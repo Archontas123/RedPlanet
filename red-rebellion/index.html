@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Red Rebellion - Plasma Hunt</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="game-container">
+        <div id="menu-screen" class="screen active">
+            <h1>RED REBELLION</h1>
+            <h2>Plasma Hunt</h2>
+            <button id="start-button">START HUNT</button>
+            <div class="game-description">
+                <p>Explore Mars, find human settlements, and eliminate them to collect plasma.</p>
+                <p>How much plasma can you gather before they take you down?</p>
+            </div>
+        </div>
+
+        <div id="game-screen" class="screen">
+            <div id="hud">
+                <div id="health-bar">
+                    <div id="health-fill"></div>
+                </div>
+                <div id="plasma-score">Plasma: 0</div>
+                <div id="weapon-display">Weapon: Knife</div>
+            </div>
+            <canvas id="game-canvas"></canvas>
+            <div id="controls-hint">
+                WASD: Move | SHIFT: Sneak | LMB: Attack | E: Switch Weapon
+            </div>
+        </div>
+
+        <div id="game-over-screen" class="screen">
+            <h2>HUNT OVER</h2>
+            <p>Final Plasma Score: <span id="final-plasma-score">0</span></p>
+            <button id="retry-button">HUNT AGAIN</button>
+        </div>
+    </div>
+    <script src="game.js"></script>
+</body>
+</html>
