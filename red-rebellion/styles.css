@@ -196,3 +196,91 @@ button:hover {
     border-color: #888888;
     background-color: rgba(136, 136, 136, 0.2);
 }
+
+/* --- Inventory Screen Styles --- */
+.inventory-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 80%;
+    max-width: 600px;
+    max-height: 80%;
+    background-color: rgba(10, 10, 10, 0.9);
+    border: 3px solid #ff3a3a;
+    border-radius: 10px;
+    padding: 20px;
+    z-index: 20; /* Above HUD */
+    display: none; /* Hidden by default */
+    flex-direction: column;
+    align-items: center;
+    box-shadow: 0 0 20px rgba(255, 58, 58, 0.5);
+    overflow-y: auto; /* Allow scrolling if content overflows */
+}
+
+.inventory-overlay.active {
+    display: flex; /* Show when active */
+}
+
+.inventory-overlay h2 {
+    color: #ff7b7b;
+    margin-bottom: 20px;
+    font-size: 1.8rem;
+}
+
+#inventory-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); /* Responsive grid */
+    gap: 15px;
+    width: 100%;
+    margin-bottom: 20px;
+    padding: 10px;
+    background-color: rgba(26, 26, 26, 0.5); /* Slightly lighter background for grid */
+    border-radius: 5px;
+}
+
+.inventory-slot {
+    width: 80px;
+    height: 80px;
+    background-color: rgba(50, 50, 50, 0.7);
+    border: 1px solid #555;
+    border-radius: 5px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    font-size: 0.8rem;
+    color: #ccc;
+    cursor: default; /* Or pointer if items are interactive */
+}
+
+.inventory-slot img {
+    max-width: 50px;
+    max-height: 50px;
+    margin-bottom: 5px;
+    image-rendering: pixelated; /* Keep pixel art crisp */
+}
+
+.item-name {
+    text-align: center;
+    line-height: 1.1;
+}
+
+.item-count {
+    position: absolute;
+    bottom: 5px;
+    right: 5px;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-size: 0.9rem;
+    font-weight: bold;
+}
+
+#close-inventory-button {
+    margin-top: auto; /* Push button to the bottom if space allows */
+    padding: 0.8rem 1.5rem;
+    font-size: 1rem;
+}

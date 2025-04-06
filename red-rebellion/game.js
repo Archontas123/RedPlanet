@@ -1,461 +1,515 @@
 import { Vector2, lineIntersectsRect, isLineOfSightClear } from './utils.js';
-import { Player, Projectile, Item, Chest } from './entities.js'; // Import Item and Chest
+import { Player, Projectile, Item, ItemDrop, Container, MedKit, Generator } from './entities.js';
 import { Settlement } from './settlement.js';
-import { Door } from './structures.js'; // Import Door
+import { Door } from './structures.js';
+import { WorldManager, CHUNK_SIZE, LOAD_RADIUS } from './world.js';
 
-document.addEventListener('DOMContentLoaded', () => {
-    // --- DOM Elements ---
-    const startButton = document.getElementById('start-button');
-    const retryButton = document.getElementById('retry-button');
-    const menuScreen = document.getElementById('menu-screen');
-    const gameScreen = document.getElementById('game-screen');
-    const gameOverScreen = document.getElementById('game-over-screen');
-    const canvas = document.getElementById('game-canvas');
-    const ctx = canvas.getContext('2d');
-    ctx.imageSmoothingEnabled = false; // Disable image smoothing for pixel art
-    const minimapCanvas = document.getElementById('minimap-canvas'); // Get minimap canvas
-    const minimapCtx = minimapCanvas ? minimapCanvas.getContext('2d') : null; // Get minimap context
-    const healthFill = document.getElementById('health-fill');
-    const plasmaScoreDisplay = document.getElementById('plasma-score');
-    const finalPlasmaScoreDisplay = document.getElementById('final-plasma-score');
-    const weaponDisplay = document.getElementById('weapon-display');
-    const rollIndicator = document.getElementById('roll-indicator'); // Get roll indicator element
+class Game {
+    constructor() {
+        this.startButton = document.getElementById('start-button');
+        this.retryButton = document.getElementById('retry-button');
+        this.menuScreen = document.getElementById('menu-screen');
+        this.gameScreen = document.getElementById('game-screen');
+        this.gameOverScreen = document.getElementById('game-over-screen');
+        this.canvas = document.getElementById('game-canvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.ctx.imageSmoothingEnabled = false;
+        this.minimapCanvas = document.getElementById('minimap-canvas');
+        this.minimapCtx = this.minimapCanvas ? this.minimapCanvas.getContext('2d') : null;
+        this.healthFill = document.getElementById('health-fill');
+        this.plasmaScoreDisplay = document.getElementById('plasma-score');
+        this.finalPlasmaScoreDisplay = document.getElementById('final-plasma-score');
+        this.weaponDisplay = document.getElementById('weapon-display');
+        this.rollIndicator = document.getElementById('roll-indicator');
+        this.inventoryScreen = document.getElementById('inventory-screen');
+        this.inventoryGrid = document.getElementById('inventory-grid');
+        this.closeInventoryButton = document.getElementById('close-inventory-button');
 
-    // --- Game State Variables ---
-    let gameActive = false;
-    let lastTime = 0;
-    let player;
-    let settlements = [];
-    let projectiles = [];
-    let items = []; // Array to hold spawned items
-    let plasmaScore = 0;
-    let worldWidth = 3000;
-    let worldHeight = 3000;
-    let camera = { x: 0, y: 0 };
-    let mousePos = { x: 0, y: 0 };
+        this.gameActive = false;
+        this.lastTime = 0;
+        this.player = null;
+        this.worldManager = null;
+        this.projectiles = [];
+        this.items = [];
+        this.itemDrops = [];
+        this.plasmaScore = 0;
+        this.inventoryOpen = false;
+        this.camera = { x: 0, y: 0 };
+        this.mousePos = { x: 0, y: 0 };
 
-    // --- Input State ---
-    // Add interact key ('f' by default in Player class)
-    const keys = { w: false, a: false, s: false, d: false, shift: false, e: false, space: false, f: false };
+        this.keys = { w: false, a: false, s: false, d: false, shift: false, e: false, space: false, f: false, v: false, p: false };
 
-    // --- Assets ---
-    const groundTile = new Image();
-    groundTile.src = 'assets/ground/ground_tile_standard.png'; // Path relative to index.html
-    let groundPattern = null; // Will be created once image loads
+        this.itemImagePaths = {
+            rock: 'assets/items/rock.png',
+            wood: 'assets/items/wood.png',
+            heal: 'assets/items/heal.png',
+            plasma: 'assets/items/plasma.png'
+        };
+        this.groundTile = new Image();
+        this.groundTile.src = 'assets/ground/ground_tile_standard.png';
+        this.groundPattern = null;
 
-    groundTile.onload = () => {
-        if (ctx) { // Ensure context exists
-            groundPattern = ctx.createPattern(groundTile, 'repeat');
-        }
-    };
-    groundTile.onerror = () => {
-        console.error("Failed to load ground tile image.");
-    };
+        this.playerImgStandard = new Image();
+        this.playerImgStandard.src = 'assets/player/standard_player.png';
+        this.playerImgIdle2 = new Image();
+        this.playerImgIdle2.src = 'assets/player/idle_down_2.png';
 
-    // --- Player Assets ---
-    const playerImgStandard = new Image();
-    playerImgStandard.src = 'assets/player/standard_player.png';
-    playerImgStandard.onerror = () => console.error("Failed to load standard_player image.");
-
-    const playerImgIdle2 = new Image();
-    playerImgIdle2.src = 'assets/player/idle_down_2.png';
-    playerImgIdle2.onerror = () => console.error("Failed to load idle_down_2 image.");
-
-    // --- Game Initialization ---
-    function initGame() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-
-        // Set minimap canvas dimensions based on CSS (or fixed size)
-        if (minimapCanvas) {
-            minimapCanvas.width = 150; // Match CSS width
-            minimapCanvas.height = 150; // Match CSS height
-        }
-
-        worldWidth = Math.max(3000, canvas.width * 3);
-        worldHeight = Math.max(3000, canvas.height * 3);
-
-        // Pass world dimensions and images to Player constructor
-        player = new Player(
-            new Vector2(worldWidth / 2, worldHeight / 2),
-            worldWidth,
-            worldHeight,
-            playerImgStandard, // Pass standard image
-            playerImgIdle2     // Pass idle frame 2 image
-        );
-        settlements = [];
-        projectiles = [];
-        items = []; // Clear items array on game start
-        plasmaScore = 0;
-        updateScoreDisplay(); // Update display initially
-
-        // Spawn the single initial settlement
-        settlements = []; // Ensure it's empty before spawning
-        spawnSettlement();
-
-        if (settlements.length === 0) {
-             console.error("Failed to spawn initial settlement. Game cannot start.");
-             // Optionally show an error message to the user
-             showScreen(menuScreen); // Go back to menu
-             return;
-        }
-
-
-        gameActive = true;
-        lastTime = performance.now();
-        requestAnimationFrame(gameLoop);
+        this.setupEventListeners();
+        this.loadAssets();
     }
 
-    // --- Settlement Spawning (Now only spawns one) ---
-    function spawnSettlement() {
-        // Simplified: Place the single settlement somewhat centrally but with some randomness
-        const placementMargin = 500; // Margin from world edges
-        const position = new Vector2(
-             placementMargin + Math.random() * (worldWidth - placementMargin * 2),
-             placementMargin + Math.random() * (worldHeight - placementMargin * 2)
-        );
-        const radius = 300; // Fixed radius, less meaningful now but kept for structure
-        const numHumans = 10; // Fixed number of humans for the single large building
-
-        // Get existing buildings (will be empty on first call)
-        const existingBuildings = settlements.flatMap(s => s.buildings);
-
-        // Pass world dimensions and necessary callbacks to Settlement constructor
-        // Removed type, pass empty array for existingBuildings initially
-        const newSettlement = new Settlement(
-            position,
-            radius,
-            numHumans,
-            worldWidth,
-            worldHeight,
-            () => { console.log("Settlement cleared!"); /* No respawn needed for single settlement */ },
-            updateScore, // Callback to update score
-            existingBuildings // Pass buildings from previous settlements (if any)
-        );
-
-        // Only add if the settlement constructor didn't fail (e.g., due to placement issues)
-        if (!newSettlement.cleared) {
-             settlements.push(newSettlement);
-        } else {
-             console.error("Settlement constructor indicated failure, not adding to game.");
-        }
+    loadAssets() {
+        this.groundTile.onload = () => {
+            if (this.ctx) {
+                this.groundPattern = this.ctx.createPattern(this.groundTile, 'repeat');
+            }
+        };
+        this.groundTile.onerror = () => console.error("Failed to load ground tile image.");
+        this.playerImgStandard.onerror = () => console.error("Failed to load standard_player image.");
+        this.playerImgIdle2.onerror = () => console.error("Failed to load idle_down_2 image.");
     }
 
-    // isPositionTooClose is no longer needed as overlap is handled in Settlement constructor
+    setupEventListeners() {
+        this.startButton.addEventListener('click', () => this.startGame());
+        this.retryButton.addEventListener('click', () => this.startGame());
+        this.closeInventoryButton.addEventListener('click', () => this.toggleInventory());
 
-    // --- Score Management ---
-    function updateScore(amount) {
-        plasmaScore += amount;
-        updateScoreDisplay();
+        window.addEventListener('keydown', (e) => this.handleKeyDown(e));
+        window.addEventListener('keyup', (e) => this.handleKeyUp(e));
+        this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+        this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+        this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        window.addEventListener('resize', () => this.handleResize());
     }
 
-    function updateScoreDisplay() {
-        plasmaScoreDisplay.textContent = `Plasma: ${plasmaScore}`;
-    }
-
-    // --- Game Loop ---
-    function gameLoop(timestamp) {
-        if (!gameActive) return;
-
-        const deltaTime = Math.min((timestamp - lastTime) / 1000, 0.05); // Limit max delta time
-        lastTime = timestamp;
-
-        // --- Update ---
-        // Pass projectiles to player update
-        player.update(deltaTime, keys, settlements, healthFill, weaponDisplay, projectiles);
-
-        // Pass player, LoS func, and projectiles to settlement update
-        settlements.forEach(settlement => settlement.update(deltaTime, player, isLineOfSightClear, projectiles)); // Already passing player here
-
-        // Projectile update signature is correct
-        projectiles.forEach(p => p.update(deltaTime, settlements, player, gameOver));
-        projectiles = projectiles.filter(p => p.lifeTime > 0);
-
-        // Update items (currently does nothing, but good practice)
-        items.forEach(item => item.update(deltaTime));
-
-        // Check for item pickup
-        for (let i = items.length - 1; i >= 0; i--) {
-            const item = items[i];
-            if (player.position.distance(item.position) < player.size.x / 2 + item.pickupRadius) {
-                if (item.itemType === 'Plasma') {
-                    updateScore(item.quantity); // Update score for Plasma
-                    console.log(`Picked up ${item.quantity} Plasma.`);
-                    items.splice(i, 1); // Remove item from game world
+    handleKeyDown(e) {
+        const key = e.key.toLowerCase();
+        if (this.gameActive && this.player) {
+            if (key === 'v') {
+                this.toggleInventory();
+                this.keys.v = true;
+                e.preventDefault();
+            } else if (!this.inventoryOpen) {
+                if (e.key === ' ') {
+                    this.keys.space = true;
+                } else if (key === this.player.interactKey) {
+                    this.keys[key] = true;
+                    this.handleInteraction();
+                } else if (key === this.player.pickupKey) {
+                    this.keys[key] = true;
+                    this.handlePickup();
+                } else if (key in this.keys) {
+                    this.keys[key] = true;
                 }
-                // Add logic for other item types here if needed
             }
         }
-
-        updateCamera();
-
-        // --- Draw ---
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        drawBackground(ctx, camera);
-
-        // Pass player to settlement draw to handle inside/outside view
-        settlements.forEach(settlement => settlement.draw(ctx, camera, player)); // Already passing player here
-
-        // Draw projectiles
-        projectiles.forEach(p => p.draw(ctx, camera));
-
-        // Draw items
-        items.forEach(item => item.draw(ctx, camera));
-
-        player.draw(ctx, camera);
-
-        // Update HUD elements (including dash indicator)
-        updateHUD();
-
-        // Draw the minimap
-        drawMinimap();
-
-        requestAnimationFrame(gameLoop); // Continue the loop
     }
 
-
-    // --- Camera and Background ---
-    function updateCamera() {
-        camera.x = player.position.x - canvas.width / 2;
-        camera.y = player.position.y - canvas.height / 2;
-        // Clamp camera to world bounds
-        camera.x = Math.max(0, Math.min(worldWidth - canvas.width, camera.x));
-        camera.y = Math.max(0, Math.min(worldHeight - canvas.height, camera.y));
+    handleKeyUp(e) {
+        const key = e.key.toLowerCase();
+        if (this.gameActive && this.player) {
+            if (key === 'v') {
+                this.keys.v = false;
+            } else if (!this.inventoryOpen) {
+                if (e.key === ' ') {
+                    this.keys.space = false;
+                } else if (key === this.player.interactKey) {
+                     this.keys[key] = false;
+                } else if (key === this.player.pickupKey) {
+                     this.keys[key] = false;
+                } else if (key in this.keys) {
+                    this.keys[key] = false;
+                }
+            }
+        }
     }
 
-    // Removed time parameter from drawBackground definition
-    function drawBackground(ctx, camera) {
-        // Draw tiled ground first
-        if (groundPattern) {
-            ctx.save(); // Save context state
-            ctx.fillStyle = groundPattern;
-            // Translate the pattern origin based on camera position for seamless tiling
-            ctx.translate(-camera.x % groundTile.width, -camera.y % groundTile.height);
-            // Fill the entire canvas area, extending slightly beyond to ensure coverage during movement
-            ctx.fillRect(
-                (camera.x % groundTile.width) - groundTile.width,
-                (camera.y % groundTile.height) - groundTile.height,
-                canvas.width + groundTile.width * 2,
-                canvas.height + groundTile.height * 2
-            );
-            ctx.restore(); // Restore context state
-        } else {
-            // Fallback solid color if pattern not ready
-            ctx.fillStyle = '#4d1a00'; // Dark reddish-brown
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+    handleMouseMove(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        this.mousePos.x = e.clientX - rect.left;
+        this.mousePos.y = e.clientY - rect.top;
+    }
+
+    handleMouseDown(e) {
+        if (e.button === 0 && !this.inventoryOpen) {
+            if (this.gameActive && this.player && this.worldManager) {
+                 this.player.attack(this.mousePos, this.camera, this.projectiles, this.worldManager.getActiveSettlements());
+            }
+        }
+    }
+
+    handleResize() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+    }
+
+    initGame() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+
+        if (this.minimapCanvas) {
+            this.minimapCanvas.width = 150;
+            this.minimapCanvas.height = 150;
         }
 
+        this.worldManager = new WorldManager((amount) => this.updateScore(amount));
 
-        // Draw stars over the ground
-        ctx.fillStyle = 'rgba(255, 255, 200, 0.6)'; // Pale yellow stars
-        const starCount = 150; // Adjust density as needed
-        // Use a simple pseudo-random distribution based on index for consistency
-        for(let i=0; i<starCount; i++) {
-             const seed = i * 137; // Simple seeding
-             // Use modulo to wrap stars within world bounds
-             const starX = ((seed * 17) % worldWidth);
-             const starY = ((seed * 29) % worldHeight);
+        const startPos = new Vector2(CHUNK_SIZE / 2, CHUNK_SIZE / 2);
 
-             // Calculate screen position
-             const screenX = starX - camera.x;
-             const screenY = starY - camera.y;
+        this.player = new Player(
+            startPos,
+            this.playerImgStandard,
+            this.playerImgIdle2
+        );
 
-             // Only draw stars visible on screen (with a small buffer)
-             if (screenX > -10 && screenX < canvas.width + 10 && screenY > -10 && screenY < canvas.height + 10) {
-                  ctx.fillRect(screenX, screenY, 2, 2); // Small square stars
+        this.projectiles = [];
+        this.items = [];
+        this.itemDrops = [];
+        this.plasmaScore = 0;
+        this.updateScoreDisplay();
+
+        this.worldManager.updateActiveChunks(this.player.position.x, this.player.position.y);
+
+        const startChunk = this.worldManager.getChunk(
+            Math.floor(startPos.x / CHUNK_SIZE),
+            Math.floor(startPos.y / CHUNK_SIZE)
+        );
+        console.log("Initial chunk:", startChunk);
+
+        this.gameActive = true;
+        this.lastTime = performance.now();
+        requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
+    }
+
+    updateScore(amount) {
+        this.plasmaScore += amount;
+        this.updateScoreDisplay();
+    }
+
+    updateScoreDisplay() {
+        this.plasmaScoreDisplay.textContent = `Plasma: ${this.plasmaScore}`;
+    }
+
+    gameLoop(timestamp) {
+        if (!this.gameActive) return;
+
+        const deltaTime = Math.min((timestamp - this.lastTime) / 1000, 0.05);
+        this.lastTime = timestamp;
+
+        const activeSettlements = this.worldManager.getActiveSettlements();
+
+        if (!this.inventoryOpen) {
+            this.worldManager.updateActiveChunks(this.player.position.x, this.player.position.y);
+
+            this.player.update(deltaTime, this.keys, this.worldManager, this.healthFill, this.weaponDisplay, this.projectiles, this.itemDrops, this);
+
+            activeSettlements.forEach(settlement => settlement.update(deltaTime, this.player, isLineOfSightClear, this.projectiles, this));
+
+            this.projectiles.forEach(p => p.update(deltaTime, this.worldManager, this.player, () => this.gameOver()));
+            this.projectiles = this.projectiles.filter(p => p.lifeTime > 0);
+
+            this.items.forEach(item => item.update(deltaTime));
+            this.itemDrops.forEach(drop => drop.update(deltaTime));
+            this.itemDrops = this.itemDrops.filter(drop => drop.lifeTime > 0);
+
+            for (let i = this.items.length - 1; i >= 0; i--) {
+                 const item = this.items[i];
+                 if (item.isInteractable && this.player.position.distance(item.position) < this.player.size.x / 2 + item.pickupRadius) {
+                     if (item.itemType === 'Plasma') {
+                         this.updateScore(item.quantity);
+                         console.log(`Picked up ${item.quantity} Plasma (pre-placed).`);
+                         this.items.splice(i, 1);
+                     }
+                 }
              }
+
+            this.updateCamera();
         }
 
-        // Removed call to drawDustClouds
-    }
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.drawBackground(this.ctx, this.camera);
 
-    // Removed drawDustClouds function definition
+        const isPlayerInside = !!this.player.currentBuilding;
 
-    // --- Minimap Drawing ---
-    function drawMinimap() {
-        if (!minimapCtx || !player) return; // Ensure context and player exist
-
-        const mapWidth = minimapCanvas.width;
-        const mapHeight = minimapCanvas.height;
-        const scaleX = mapWidth / worldWidth;
-        const scaleY = mapHeight / worldHeight;
-
-        // Clear minimap
-        minimapCtx.fillStyle = 'rgba(10, 10, 10, 0.8)'; // Dark background
-        minimapCtx.fillRect(0, 0, mapWidth, mapHeight);
-
-        // Draw settlements (buildings)
-        minimapCtx.fillStyle = '#888888'; // Grey for buildings
-        settlements.forEach(settlement => {
+        activeSettlements.forEach(settlement => {
             settlement.buildings.forEach(building => {
-                const mapX = building.position.x * scaleX;
-                const mapY = building.position.y * scaleY;
-                const mapW = building.size.x * scaleX; // Use building.size.x
-                const mapH = building.size.y * scaleY; // Use building.size.y
-                minimapCtx.fillRect(mapX, mapY, Math.max(1, mapW), Math.max(1, mapH)); // Ensure at least 1px size
+                const drawFloor = isPlayerInside && this.player.currentBuilding === building ? this.player.currentFloor : 0;
+                const drawInterior = isPlayerInside && this.player.currentBuilding === building;
+                building.draw(this.ctx, this.camera, drawFloor, drawInterior);
+            });
+
+            settlement.humans.forEach(human => {
+                const sameFloor = isPlayerInside && this.player.currentBuilding === human.building && this.player.currentFloor === human.currentFloor;
+                const bothOutside = !isPlayerInside && !human.building;
+                if (sameFloor || bothOutside) {
+                    human.draw(this.ctx, this.camera);
+                }
             });
         });
 
-        // Draw player
-        minimapCtx.fillStyle = '#ff3a3a'; // Red for player (matches health bar)
-        const playerMapX = player.position.x * scaleX;
-        const playerMapY = player.position.y * scaleY;
-        minimapCtx.beginPath();
-        minimapCtx.arc(playerMapX, playerMapY, 3, 0, Math.PI * 2); // Draw a small circle for the player
-        minimapCtx.fill();
+        this.items.forEach(item => {
+            if (!isPlayerInside) {
+                 item.draw(this.ctx, this.camera);
+            }
+        });
 
-        // Optional: Draw camera view rectangle (can be complex, skip for now)
+        this.itemDrops.forEach(drop => {
+            const sameFloor = (!isPlayerInside && drop.floorIndex === 0) ||
+                              (isPlayerInside && drop.floorIndex === this.player.currentFloor);
+            if (sameFloor) {
+                drop.draw(this.ctx, this.camera);
+            }
+        });
+
+        this.projectiles.forEach(p => p.draw(this.ctx, this.camera));
+
+        this.player.draw(this.ctx, this.camera);
+
+        this.updateHUD();
+        this.drawMinimap();
+
+        requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
     }
 
+    updateCamera() {
+        this.camera.x = this.player.position.x - this.canvas.width / 2;
+        this.camera.y = this.player.position.y - this.canvas.height / 2;
+    }
 
-    // --- HUD Update ---
-    function updateHUD() {
-        // Update roll indicator based on cooldown
-        if (player && rollIndicator) {
-            if (player.dashCooldownTimer <= 0) { // Use dashCooldownTimer (assuming cooldown logic remains the same)
-                rollIndicator.classList.add('ready');
-                rollIndicator.classList.remove('cooldown');
-                rollIndicator.textContent = 'ROLL READY'; // Update text
-            } else {
-                rollIndicator.classList.add('cooldown');
-                rollIndicator.classList.remove('ready');
-                // Display remaining cooldown time (optional)
-                rollIndicator.textContent = `ROLL (${player.dashCooldownTimer.toFixed(1)}s)`; // Update text and use dashCooldownTimer
+    drawBackground(ctx, camera) {
+        if (this.groundPattern) {
+            ctx.save();
+            ctx.fillStyle = this.groundPattern;
+            ctx.translate(-camera.x % this.groundTile.width, -camera.y % this.groundTile.height);
+            ctx.fillRect(
+                (camera.x % this.groundTile.width) - this.groundTile.width,
+                (camera.y % this.groundTile.height) - this.groundTile.height,
+                this.canvas.width + this.groundTile.width * 2,
+                this.canvas.height + this.groundTile.height * 2
+            );
+            ctx.restore();
+        } else {
+            ctx.fillStyle = '#4d1a00';
+            ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        }
+
+        ctx.fillStyle = 'rgba(255, 255, 200, 0.6)';
+        const starsPerChunk = 10;
+        const { chunkX: centerChunkX, chunkY: centerChunkY } = this.worldManager.getChunkCoords(camera.x + this.canvas.width / 2, camera.y + this.canvas.height / 2);
+        const renderRadius = 2;
+
+        for (let dx = -renderRadius; dx <= renderRadius; dx++) {
+            for (let dy = -renderRadius; dy <= renderRadius; dy++) {
+                const chunkX = centerChunkX + dx;
+                const chunkY = centerChunkY + dy;
+                const chunkWorldX = chunkX * CHUNK_SIZE;
+                const chunkWorldY = chunkY * CHUNK_SIZE;
+
+                const chunkSeed = this.worldManager.simpleHash(chunkX, chunkY, this.worldManager.worldSeed * 3);
+                for (let i = 0; i < starsPerChunk; i++) {
+                    const starSeed = chunkSeed + i * 79;
+                    const starRelX = this.worldManager.seededRandom(starSeed * 17) * CHUNK_SIZE;
+                    const starRelY = this.worldManager.seededRandom(starSeed * 29) * CHUNK_SIZE;
+                    const starWorldX = chunkWorldX + starRelX;
+                    const starWorldY = chunkWorldY + starRelY;
+
+                    const screenX = starWorldX - camera.x;
+                    const screenY = starWorldY - camera.y;
+
+                    if (screenX > -10 && screenX < this.canvas.width + 10 && screenY > -10 && screenY < this.canvas.height + 10) {
+                         ctx.fillRect(screenX, screenY, 2, 2);
+                    }
+                }
             }
         }
-        // Health and weapon are updated within Player.update, score updated via callback
     }
 
-    // --- Screen Management ---
-    function showScreen(screen) {
+    drawMinimap() {
+        if (!this.minimapCtx || !this.player || !this.worldManager) return;
+
+        const mapWidth = this.minimapCanvas.width;
+        const mapHeight = this.minimapCanvas.height;
+        const minimapWorldViewSize = CHUNK_SIZE * (LOAD_RADIUS * 2 + 1);
+        const scale = mapWidth / minimapWorldViewSize;
+        const viewWorldX = this.player.position.x - (mapWidth / scale / 2);
+        const viewWorldY = this.player.position.y - (mapHeight / scale / 2);
+
+        this.minimapCtx.fillStyle = 'rgba(10, 10, 10, 0.8)';
+        this.minimapCtx.fillRect(0, 0, mapWidth, mapHeight);
+
+        const activeSettlements = this.worldManager.getActiveSettlements();
+
+        this.minimapCtx.fillStyle = '#888888';
+        activeSettlements.forEach(settlement => {
+            settlement.buildings.forEach(building => {
+                const relativeX = building.position.x - viewWorldX;
+                const relativeY = building.position.y - viewWorldY;
+                const mapX = relativeX * scale;
+                const mapY = relativeY * scale;
+                const mapW = building.size.x * scale;
+                const mapH = building.size.y * scale;
+
+                if (mapX + mapW > 0 && mapX < mapWidth && mapY + mapH > 0 && mapY < mapHeight) {
+                    this.minimapCtx.fillRect(mapX, mapY, Math.max(1, mapW), Math.max(1, mapH));
+                }
+            });
+        });
+
+        this.minimapCtx.fillStyle = '#ff3a3a';
+        const playerMapX = mapWidth / 2;
+        const playerMapY = mapHeight / 2;
+        this.minimapCtx.beginPath();
+        this.minimapCtx.arc(playerMapX, playerMapY, 3, 0, Math.PI * 2);
+        this.minimapCtx.fill();
+    }
+
+    updateHUD() {
+        if (this.player && this.rollIndicator) {
+            if (this.player.dashCooldownTimer <= 0) {
+                this.rollIndicator.classList.add('ready');
+                this.rollIndicator.classList.remove('cooldown');
+                this.rollIndicator.textContent = 'ROLL READY';
+            } else {
+                this.rollIndicator.classList.add('cooldown');
+                this.rollIndicator.classList.remove('ready');
+                this.rollIndicator.textContent = `ROLL (${this.player.dashCooldownTimer.toFixed(1)}s)`;
+            }
+        }
+    }
+
+    toggleInventory() {
+        this.inventoryOpen = !this.inventoryOpen;
+        this.inventoryScreen.classList.toggle('active', this.inventoryOpen);
+        if (this.inventoryOpen) {
+            this.updateInventoryDisplay();
+        }
+    }
+
+    updateInventoryDisplay() {
+        if (!this.player || !this.inventoryGrid) return;
+
+        this.inventoryGrid.innerHTML = '';
+
+        for (const itemType in this.player.inventory) {
+            const count = this.player.inventory[itemType];
+            if (count > 0) {
+                const slot = document.createElement('div');
+                slot.className = 'inventory-slot';
+
+                const img = document.createElement('img');
+                img.src = this.itemImagePaths[itemType] || '';
+                img.alt = itemType;
+                img.onerror = () => { img.style.display = 'none'; };
+                slot.appendChild(img);
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'item-name';
+                nameSpan.textContent = itemType.charAt(0).toUpperCase() + itemType.slice(1);
+                slot.appendChild(nameSpan);
+
+                const countSpan = document.createElement('span');
+                countSpan.className = 'item-count';
+                countSpan.textContent = count;
+                slot.appendChild(countSpan);
+
+                this.inventoryGrid.appendChild(slot);
+            }
+        }
+    }
+
+    showScreen(screen) {
         document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
         screen.classList.add('active');
     }
 
-    function startGame() {
-        showScreen(gameScreen);
-        initGame();
+    startGame() {
+        this.showScreen(this.gameScreen);
+        this.initGame();
     }
 
-    function gameOver() {
-        gameActive = false;
-        finalPlasmaScoreDisplay.textContent = plasmaScore; // Show final score
-        showScreen(gameOverScreen);
+    gameOver() {
+        this.gameActive = false;
+        this.finalPlasmaScoreDisplay.textContent = this.plasmaScore;
+        this.showScreen(this.gameOverScreen);
     }
 
-    // --- Event Listeners ---
-    window.addEventListener('keydown', (e) => {
-        const key = e.key.toLowerCase();
-        if (gameActive && player) { // Only process keys if game is active
-            if (e.key === ' ') { // Handle space specifically
-                keys.space = true;
-            } else if (key === player.interactKey) { // Use player's interact key
-                keys[key] = true;
-                handleInteraction(); // Call interaction logic on key down
-            } else if (key in keys) { // Handle other tracked keys (w,a,s,d,shift,e)
-                keys[key] = true;
-            }
-        }
-    });
-    window.addEventListener('keyup', (e) => {
-        const key = e.key.toLowerCase();
-        if (gameActive && player) { // Only process keys if game is active
-            if (e.key === ' ') { // Handle space specifically
-                keys.space = false;
-            } else if (key === player.interactKey) {
-                 keys[key] = false; // Reset interaction key state on key up
-            } else if (key in keys) { // Handle other tracked keys
-                keys[key] = false;
-            }
-        }
-    });
+    handleInteraction() {
+        if (!this.gameActive || !this.player || this.inventoryOpen) return;
 
-    canvas.addEventListener('mousemove', (e) => {
-        const rect = canvas.getBoundingClientRect();
-        mousePos.x = e.clientX - rect.left;
-        mousePos.y = e.clientY - rect.top;
-    });
+        const target = this.player.interactTarget;
 
-    canvas.addEventListener('mousedown', (e) => {
-        if (e.button === 0) { // Left click
-            // mouseClick = true; // State not strictly needed here
-            if (gameActive && player) {
-                 // Pass necessary dependencies to player attack
-                 player.attack(mousePos, camera, projectiles, settlements);
-            }
-        }
-    });
-
-    // canvas.addEventListener('mouseup', (e) => {
-    //     if (e.button === 0) {
-    //         mouseClick = false;
-    //     }
-    // }); // Not strictly needed if attack triggers on mousedown
-
-    canvas.addEventListener('contextmenu', (e) => e.preventDefault()); // Prevent right-click menu
-
-    window.addEventListener('resize', () => {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-        // Camera update will handle adjustment in the next frame
-    });
-
-    // --- Initial Setup ---
-    startButton.addEventListener('click', startGame);
-    retryButton.addEventListener('click', startGame);
-
-        // Show the menu screen initially (optional, could be handled by CSS)
-        // showScreen(menuScreen);
-
-    // --- Interaction Handling ---
-    function handleInteraction() {
-        if (!gameActive || !player || !player.settlement) return; // Ensure player is in a settlement
-
-        const interactionReach = 60; // Increased reach slightly
-        let closestInteractable = null;
-        let minDistanceSq = interactionReach * interactionReach;
-
-        const currentSettlement = player.settlement; // Use the settlement the player is currently in
-
-        // Find the closest door AND closest chest within reach independently
-        const closestDoor = currentSettlement.findClosestDoor(player.position, interactionReach);
-        const closestChest = currentSettlement.findClosestChest(player.position, interactionReach);
-
-        let doorDistSq = Infinity;
-        let chestDistSq = Infinity;
-
-        if (closestDoor) {
-            doorDistSq = player.position.distanceSq(closestDoor.position);
-        }
-        if (closestChest) {
-            chestDistSq = player.position.distanceSq(closestChest.position);
-        }
-
-        // Determine which one is actually closer
-        if (doorDistSq < chestDistSq && doorDistSq <= minDistanceSq) {
-            closestInteractable = closestDoor;
-        } else if (chestDistSq < doorDistSq && chestDistSq <= minDistanceSq) {
-            closestInteractable = closestChest;
-        } else {
-            closestInteractable = null; // Neither is close enough or exists
-        }
-
-        // Perform interaction if a target was found
-        if (closestInteractable) {
-            const interactionResult = closestInteractable.interact(player); // Call interact on the specific entity
-
-            if (closestInteractable instanceof Chest && interactionResult && interactionResult.itemSpawned) {
-                // Chest interaction resulted in spawning an item
-                const details = interactionResult.itemSpawned;
-                const newItem = new Item(details.position, details.type, details.quantity);
-                items.push(newItem); // Add the spawned item to the game world
-                console.log(`Chest opened, spawned ${details.quantity} ${details.type}`);
-            } else if (closestInteractable instanceof Door) {
+        if (target) {
+            if (target.isDoor) {
+                target.interact(this.player);
                 console.log("Toggled door.");
-                // No further action needed here, door state changed internally
-            } else if (closestInteractable instanceof Chest) {
-                 console.log("Chest opened (empty or already open).");
+            } else if (target.isStairs) {
+                const interactionResult = target.interact(this.player);
+                if (interactionResult) {
+                    console.log(`Using stairs to floor ${interactionResult.targetFloor}`);
+                    this.player.currentFloor = interactionResult.targetFloor;
+                    this.player.position = interactionResult.targetPosition.clone();
+                    this.updateCamera();
+                }
+            } else if (target.isContainer || target.isMedKit) {
+                const drops = target.interact(this.player);
+                if (drops && Array.isArray(drops) && drops.length > 0) {
+                    const interactableType = target.isContainer ? 'Container' : 'MedKit';
+                    console.log(`Interacted with ${interactableType}. Spawning drops...`);
+                    drops.forEach(dropInfo => {
+                        const spawnOffset = Vector2.fromAngle(Math.random() * Math.PI * 2, Math.random() * 15 + 10);
+                        const spawnPos = target.position.add(spawnOffset);
+                        const newDrop = new ItemDrop(spawnPos, dropInfo.type, dropInfo.quantity, this.player.currentFloor);
+                        this.itemDrops.push(newDrop);
+                        console.log(` --> Spawned drop: ${dropInfo.quantity} ${dropInfo.type} on floor ${this.player.currentFloor} at ${spawnPos.x.toFixed(1)}, ${spawnPos.y.toFixed(1)}`);
+                    });
+                } else {
+                     console.log(`Interacted with already opened ${target.isContainer ? 'Container' : 'MedKit'}.`);
+                }
+            } else if (target.isGenerator) {
+                const interactionResult = target.interact(this.player);
+                if (interactionResult) {
+                    console.log("Interacted with generator, plasma added directly.");
+                } else {
+                    console.log("Interacted with already used Generator.");
+                }
+            } else {
+                console.warn("Attempted to interact with unknown target type:", target);
             }
         }
     }
+
+    handlePickup() {
+        if (!this.gameActive || !this.player || this.inventoryOpen || !this.player.pickupTarget) return;
+
+        const targetDrop = this.player.pickupTarget;
+        const distanceSq = this.player.position.distanceSq(targetDrop.position);
+        const sameFloor = (!this.player.currentBuilding && targetDrop.floorIndex === 0) ||
+                          (this.player.currentBuilding && targetDrop.floorIndex === this.player.currentFloor);
+
+        if (distanceSq < targetDrop.pickupRadius * targetDrop.pickupRadius && sameFloor) {
+            if (targetDrop.itemType in this.player.inventory) {
+                this.player.inventory[targetDrop.itemType] += targetDrop.quantity;
+                console.log(`Picked up ${targetDrop.quantity} ${targetDrop.itemType}. New total: ${this.player.inventory[targetDrop.itemType]}`);
+
+                const index = this.itemDrops.indexOf(targetDrop);
+                if (index > -1) {
+                    this.itemDrops.splice(index, 1);
+                }
+                this.player.pickupTarget = null;
+            } else {
+                console.warn(`Attempted to pick up unknown item type: ${targetDrop.itemType}`);
+                const index = this.itemDrops.indexOf(targetDrop);
+                if (index > -1) {
+                    this.itemDrops.splice(index, 1);
+                }
+                this.player.pickupTarget = null;
+            }
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const game = new Game();
+    // Initial screen display is handled by CSS or could be triggered here if needed
+    // game.showScreen(game.menuScreen);
 });

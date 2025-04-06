@@ -21,18 +21,28 @@
         <div id="game-screen" class="screen">
             <div id="hud">
                 <div id="health-bar">
-                    <div id="health-fill"></div>
-                </div>
-                <div id="plasma-score">Plasma: 0</div>
-                <div id="weapon-display">Weapon: Knife</div>
-                <div id="roll-indicator" class="ability-indicator ready">ROLL</div>
+                <div id="health-fill"></div>
             </div>
+            <div id="plasma-score">Plasma: 0</div>
+            <!-- Removed old inventory display -->
+            <div id="weapon-display">Weapon: Knife</div>
+            <div id="roll-indicator" class="ready">ROLL READY</div>
+        </div>
             <div id="minimap">
                 <canvas id="minimap-canvas"></canvas>
             </div>
             <canvas id="game-canvas"></canvas>
             <div id="controls-hint">
-                WASD: Move | SHIFT: Sneak | LMB: Attack | E: Switch Weapon
+                WASD: Move | SHIFT: Sneak | LMB: Attack | E: Switch Weapon | V: Inventory
+            </div>
+
+            <!-- Add Inventory Screen -->
+            <div id="inventory-screen" class="inventory-overlay">
+                <h2>Inventory</h2>
+                <div id="inventory-grid">
+                    <!-- Inventory slots will be added here by JS -->
+                </div>
+                <button id="close-inventory-button">Close [V]</button>
             </div>
         </div>
 
@@ -42,6 +52,12 @@
             <button id="retry-button">HUNT AGAIN</button>
         </div>
     </div>
-    <script type="module" src="game.js"></script>
+    <script type="module" src="utils.js"></script>
+    <script type="module" src="pathfinding.js"></script>
+    <script type="module" src="structures.js"></script>
+    <script type="module" src="entities.js"></script>
+    <script type="module" src="settlement.js"></script>
+    <script type="module" src="world.js"></script> <!-- Add world.js -->
+    <script type="module" src="game.js"></script> <!-- game.js loads last -->
 </body>
 </html>
