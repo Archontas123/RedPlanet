@@ -1,215 +1,376 @@
 import { Vector2 } from './utils.js';
-import { Obstacle, Human } from './entities.js';
+import { Human, HeavyHuman, Chest } from './entities.js'; // Removed Obstacle import, Added Chest
+import { Building, Wall, Door } from './structures.js'; // Import new structure classes
 
 // Dependencies needed from main game scope:
 // - spawnSettlement (Function)
 // - plasmaScore (Number, needs to be updated) -> Better to return reward and update in main scope
 // - plasmaScoreDisplay (DOM Element) -> Update in main scope
 // - worldWidth, worldHeight (Numbers)
+// - existingBuildings (Array of Building objects from game state)
 
 export class Settlement {
-    constructor(position, radius, numHumans, worldWidth, worldHeight, spawnSettlementCallback, updateScoreCallback) {
-        this.position = position;
-        this.radius = radius;
+    constructor(position, radius, numHumans, worldWidth, worldHeight, spawnSettlementCallback, updateScoreCallback, existingBuildings = []) {
+        // Removed type parameter, all settlements are functionally similar now
+        this.position = position; // Center of the settlement area
+        this.radius = radius; // Overall area radius (less relevant with one building?)
         this.humans = [];
-        this.obstacles = [];
-        this.color = 'rgba(100, 100, 100, 0.08)';
+        this.buildings = []; // Array to hold Building instances (will contain only one)
+        this.chests = []; // Array to hold Chest instances
         this.cleared = false;
-        this.plasmaReward = numHumans * 25;
+        this.alarmState = 'calm'; // 'calm', 'suspicious', 'alerted'
+        this.plasmaReward = numHumans * 50; // Increased reward for larger building
         this.worldWidth = worldWidth;
         this.worldHeight = worldHeight;
         this.spawnSettlementCallback = spawnSettlementCallback; // Function to call when cleared
         this.updateScoreCallback = updateScoreCallback; // Function to update score
 
-        const numObstacles = Math.floor(radius / 40) + Math.floor(Math.random() * 3);
-        for (let i = 0; i < numObstacles; i++) {
-             let obsPos, obsSize;
-             let attempts = 0;
-             do {
-                  const angle = Math.random() * Math.PI * 2;
-                  const dist = Math.random() * radius * 0.85;
-                  obsPos = position.add(new Vector2(Math.cos(angle) * dist, Math.sin(angle) * dist));
-                  const width = Math.random() * 40 + 20;
-                  const height = Math.random() * 40 + 20;
-                  obsSize = new Vector2(width, height);
-                  attempts++;
-             } while (this.isObstacleTooClose(obsPos, obsSize) && attempts < 10);
+        // --- Create One Large Building ---
+        const buildingSize = new Vector2(600, 450); // Significantly larger size
+        let buildingPos = this.position.subtract(new Vector2(buildingSize.x / 2, buildingSize.y / 2));
 
-             if (attempts < 10) {
-                  this.obstacles.push(new Obstacle(obsPos, obsSize));
-             }
-        }
-
-        for (let i = 0; i < numHumans; i++) {
-            const patrolPath = this.generatePatrolPath(3);
-
-            if (patrolPath.length > 0) {
-                 // Pass world dimensions and settlement reference to Human constructor
-                 const newHuman = new Human(patrolPath, this, this.worldWidth, this.worldHeight);
-                 // Calculate initial path for patrol
-                 if (newHuman.patrolPath.length > 0) {
-                      newHuman.calculatePath(newHuman.patrolPath[newHuman.currentPatrolIndex]);
-                 }
-                 this.humans.push(newHuman);
-            } else {
-                 console.warn("Could not generate valid patrol path for human.");
-                 const fallbackPath = [this.getRandomPointInSettlement(this.radius * 0.5)];
-                 if (!this.isPointInObstacle(fallbackPath[0])) {
-                      const newHuman = new Human(fallbackPath, this, this.worldWidth, this.worldHeight);
-                      // Calculate initial path for fallback
-                      if (newHuman.patrolPath.length > 0) {
-                           newHuman.calculatePath(newHuman.patrolPath[newHuman.currentPatrolIndex]);
-                      }
-                      this.humans.push(newHuman);
-                 } else {
-                      console.error("Fallback human placement failed.");
+        // Basic Overlap Prevention (more robust needed if multiple settlements/buildings exist)
+        let placementValid = false;
+        let attempts = 0;
+        const maxPlacementAttempts = 10;
+        while (!placementValid && attempts < maxPlacementAttempts) {
+            placementValid = true;
+            // Check against existing buildings passed from game state
+            for (const existing of existingBuildings) {
+                 // Simple AABB collision check
+                 if (buildingPos.x < existing.position.x + existing.size.x &&
+                     buildingPos.x + buildingSize.x > existing.position.x &&
+                     buildingPos.y < existing.position.y + existing.size.y &&
+                     buildingPos.y + buildingSize.y > existing.position.y) {
+                    placementValid = false;
+                    // Try shifting position slightly if overlap detected
+                    buildingPos = buildingPos.add(new Vector2(Math.random() * 100 - 50, Math.random() * 100 - 50));
+                    // Clamp position to stay within world bounds (simple clamp)
+                    buildingPos.x = Math.max(50, Math.min(this.worldWidth - buildingSize.x - 50, buildingPos.x));
+                    buildingPos.y = Math.max(50, Math.min(this.worldHeight - buildingSize.y - 50, buildingPos.y));
+                    console.warn(`Building overlap detected, attempting new position: ${buildingPos.x}, ${buildingPos.y}`);
+                    break; // Re-check against all existing buildings with new position
                  }
             }
+            attempts++;
         }
+
+        if (!placementValid) {
+             console.error("Could not place building without overlap after multiple attempts. Skipping building creation.");
+             // Handle error state - maybe don't create settlement?
+             this.cleared = true; // Mark as cleared immediately if no building?
+             return;
+        }
+
+
+        // Create the single building (removed type argument)
+        const mainBuilding = new Building(buildingPos, buildingSize);
+        this.buildings.push(mainBuilding);
+        console.log(`Created single large building at ${buildingPos.x}, ${buildingPos.y}`);
+        // --- End Building Creation ---
+
+        // --- Spawn Humans Inside The Building ---
+        // All humans spawn in the single building
+        const building = this.buildings[0]; // Get the single building
+        for (let i = 0; i < numHumans; i++) {
+            // Pass the specific building to generate paths/points inside it
+            const patrolPath = this.generatePatrolPathInside(building, 3); // Generate path within the building
+            let newHuman;
+
+                if (patrolPath.length > 0) {
+                    const HumanClass = Math.random() < 0.20 ? HeavyHuman : Human;
+                    // Log the building object right before instantiation
+                    console.log(`Settlement Constructor: Instantiating ${HumanClass.name} with building:`, building);
+                     if (typeof building === 'undefined') {
+                          console.error(`!!! Building is undefined right before creating ${HumanClass.name} !!!`);
+                     }
+                    // Pass the building reference to the Human constructor
+                    newHuman = new HumanClass(patrolPath, this, building, this.worldWidth, this.worldHeight);
+
+                    if (newHuman.patrolPath.length > 0) {
+                        // Path calculation now needs the combined obstacles from the settlement
+                        newHuman.calculatePath(newHuman.patrolPath[newHuman.currentPatrolIndex], this.getActiveObstacles());
+                    }
+                    this.humans.push(newHuman);
+                } else {
+                    console.warn("Could not generate valid patrol path inside building for human.");
+                    // Get fallback point within the specific building
+                    const fallbackPoint = building.getRandomPointInside();
+                    const fallbackPath = [fallbackPoint];
+                    const HumanClass = Math.random() < 0.20 ? HeavyHuman : Human;
+                     // Log the building object right before fallback instantiation
+                     console.log(`Settlement Constructor: Instantiating FALLBACK ${HumanClass.name} with building:`, building);
+                      if (typeof building === 'undefined') {
+                           console.error(`!!! Building is undefined right before creating FALLBACK ${HumanClass.name} !!!`);
+                      }
+                     // Pass the building reference to the Human constructor
+                    newHuman = new HumanClass(fallbackPath, this, building, this.worldWidth, this.worldHeight);
+
+                    if (newHuman.patrolPath.length > 0) {
+                         newHuman.calculatePath(newHuman.patrolPath[newHuman.currentPatrolIndex], this.getActiveObstacles());
+                    }
+                    this.humans.push(newHuman);
+                }
+            }
+        // Ensure we don't exceed numHumans if division wasn't exact
+        while (this.humans.length > numHumans) {
+            this.humans.pop();
+        }
+
+        // --- Spawn Chests Inside The Building ---
+        const numChests = 1 + Math.floor(Math.random() * 3); // 1 to 3 chests
+        for (let i = 0; i < numChests; i++) {
+            let chestPos;
+            let attempts = 0;
+            const maxChestAttempts = 20;
+            do {
+                chestPos = building.getRandomPointInside(true); // Get point, avoid walls/doors
+                attempts++;
+                // Optional: Add check to ensure chest doesn't overlap existing chests
+            } while (!chestPos && attempts < maxChestAttempts);
+
+            if (chestPos) {
+                // TODO: Add actual items to chests later
+                const newChest = new Chest(chestPos, [{ name: 'Placeholder', quantity: 1 }]);
+                this.chests.push(newChest);
+                console.log(`Placed chest ${i + 1} at ${chestPos.x.toFixed(0)}, ${chestPos.y.toFixed(0)}`);
+            } else {
+                console.warn(`Could not place chest ${i + 1} inside building.`);
+            }
+        }
+        // --- End Chest Spawning ---
+
+    }; // End of constructor
+
+    // Generates a patrol path within the bounds of a specific building
+    generatePatrolPathInside(building, numPoints = 3) {
+        const path = [];
+        const maxAttemptsPerPoint = 15;
+
+        for (let i = 0; i < numPoints; i++) {
+            let point;
+            let attempts = 0;
+            do {
+                // Use building's method to get a random point inside it
+                point = building.getRandomPointInside();
+                attempts++;
+            } while (attempts < maxAttemptsPerPoint && !point); // getRandomPointInside handles obstacle checks
+
+            if (point) {
+                path.push(point);
+            } else {
+                console.warn(`Failed to find valid point ${i + 1} for internal patrol path in building.`);
+                // Return partial path if points were found, otherwise empty
+                return path;
+            }
+        }
+        return path;
+    };
+
+    // No longer needed, building class has its own method
+    // getRandomPointInBuilding(...) { ... };
+
+    // Get all walls and closed doors from all buildings in the settlement
+    getActiveObstacles() {
+        let allObstacles = [];
+        this.buildings.forEach(building => {
+            allObstacles = allObstacles.concat(building.getObstacles()); // Assumes Building.getObstacles() returns walls + closed doors
+        });
+        return allObstacles;
     }
 
-    generatePatrolPath(numPoints = 3) {
-         const path = [];
-         const maxAttemptsPerPoint = 15;
-         for (let i = 0; i < numPoints; i++) {
-              let point;
-              let attempts = 0;
-              do {
-                   const angle = Math.random() * Math.PI * 2;
-                   const dist = Math.random() * this.radius * 0.8 + this.radius * 0.1;
-                   point = this.position.add(new Vector2(Math.cos(angle) * dist, Math.sin(angle) * dist));
-                   attempts++;
-              } while (this.isPointInObstacle(point) && attempts < maxAttemptsPerPoint);
+    // Check if a point is inside any building structure (wall or closed door)
+    isPointInObstacle(point) {
+        for (const building of this.buildings) {
+            if (building.isPointInsideStructure(point)) {
+                return true;
+            }
+        }
+        return false;
+    };
 
-              if (attempts < maxAttemptsPerPoint) {
-                   path.push(point);
-              } else {
-                   console.warn(`Failed to find non-obstacle point ${i+1} for patrol path.`);
-                   // Return partial path if some points were found, or empty if none were
-                   return path;
-              }
-         }
-         return path;
-    }
-
-    getRandomPointInSettlement(radius = this.radius * 0.9) {
-         let point;
-         let attempts = 0;
-         do {
-              point = this.position.add(new Vector2(
-                   (Math.random() - 0.5) * 2 * radius,
-                   (Math.random() - 0.5) * 2 * radius
-              ));
-              // Clamp point within world bounds (important for pathfinding later)
-              point.x = Math.max(10, Math.min(this.worldWidth - 10, point.x)); // Use worldWidth
-              point.y = Math.max(10, Math.min(this.worldHeight - 10, point.y)); // Use worldHeight
-              // Ensure it's within the desired radius of the settlement center
-              if (point.distance(this.position) > radius) {
-                  point = this.position.add(point.subtract(this.position).normalize().multiply(radius));
-              }
-              attempts++;
-         } while (this.isPointInObstacle(point) && attempts < 10);
-         return attempts < 10 ? point : this.position; // Fallback to settlement center
+    // Check if player is inside the bounds of *any* building
+    checkPlayerInside(player) { // Accept player as argument
+        for (const building of this.buildings) {
+            if (building.containsPoint(player.position)) { // Use passed player object
+                return building; // Return the building the player is in
+            }
+        }
+        return null; // Player is not inside any building
     }
 
 
-    isObstacleTooClose(pos, size) {
-         const halfWidth = size.x / 2;
-         const halfHeight = size.y / 2;
-         for (const obs of this.obstacles) {
-              const obsHalfWidth = obs.size.x / 2;
-              const obsHalfHeight = obs.size.y / 2;
-              const minGap = 15; // Minimum gap between obstacles
+    update(deltaTime, player, isLineOfSightClearFunc, projectiles) {
+        // if (this.cleared) return; // Removed check
 
-              if (
-                   pos.x + halfWidth + minGap > obs.position.x - obsHalfWidth &&
-                   pos.x - halfWidth - minGap < obs.position.x + obsHalfWidth &&
-                   pos.y + halfHeight + minGap > obs.position.y - obsHalfHeight &&
-                   pos.y - halfHeight - minGap < obs.position.y + obsHalfHeight
-              ) { return true; }
-         }
-         return false;
-    }
+        const currentObstacles = this.getActiveObstacles(); // Get current obstacles (walls + closed doors)
 
-     isPointInObstacle(point) {
-         for (const obstacle of this.obstacles) {
-              if (
-                   point.x > obstacle.position.x - obstacle.size.x / 2 &&
-                   point.x < obstacle.position.x + obstacle.size.x / 2 &&
-                   point.y > obstacle.position.y - obstacle.size.y / 2 &&
-                   point.y < obstacle.position.y + obstacle.size.y / 2
-              ) { return true; }
-         }
-         return false;
-    }
- 
- 
-    update(deltaTime, player, isLineOfSightClearFunc, projectiles) { // Pass dependencies needed by Human.update, including projectiles
-        if (this.cleared) return;
+        // Determine which building the player is currently inside (if any)
+        const playerBuilding = this.checkPlayerInside(player); // Pass player to checkPlayerInside
+
         for (let i = this.humans.length - 1; i >= 0; i--) {
-             // Pass player, LoS function, and projectiles to human update
-             this.humans[i].update(deltaTime, player, isLineOfSightClearFunc, projectiles);
+            // Pass the current obstacles to the human update function
+            this.humans[i].update(deltaTime, player, isLineOfSightClearFunc, projectiles, currentObstacles);
         }
-    }
+    };
 
-    draw(ctx, camera) {
-        // Draw settlement radius (optional visualization)
-        ctx.strokeStyle = this.color;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(this.position.x - camera.x, this.position.y - camera.y, this.radius, 0, Math.PI * 2);
-        ctx.stroke();
+    draw(ctx, camera, player) { // Pass player to check position
+        // if (this.cleared) return; // Removed check
 
+        // Determine which building the player is currently inside (if any)
+        const playerBuilding = this.checkPlayerInside(player); // Pass player to checkPlayerInside
 
-        if (this.cleared) return; // Don't draw obstacles/humans if cleared
-        this.obstacles.forEach(obstacle => obstacle.draw(ctx, camera));
-        this.humans.forEach(human => human.draw(ctx, camera));
-    }
+        // Draw Buildings
+        this.buildings.forEach(building => {
+            const isPlayerInsideThisBuilding = (building === playerBuilding);
+            building.draw(ctx, camera, isPlayerInsideThisBuilding);
+        });
+
+        // Draw Humans (Consider drawing only if player is nearby or inside their building?)
+        this.humans.forEach(human => {
+             // Simple logic: Draw if player is inside the same building as the human
+             if (playerBuilding && human.building === playerBuilding) {
+                 human.draw(ctx, camera);
+             } else if (!playerBuilding && this.position.distance(player.position) < this.radius + 50) {
+                 // Or draw if player is outside but near the settlement (optional)
+                 // human.draw(ctx, camera);
+             }
+        });
+
+        // Draw Chests (Draw if player is inside the building)
+        if (playerBuilding) {
+            this.chests.forEach(chest => {
+                // Check if chest is within the building the player is in
+                // (Assuming chests are only placed inside the single building for now)
+                chest.draw(ctx, camera);
+            });
+        }
+        // Optionally draw chests if player is nearby but outside?
+        // else if (this.position.distance(player.position) < this.radius + 50) { ... }
+
+    };
 
     notifyHumanDeath(deadHuman, killer, killContext) {
-         const killPosition = deadHuman.position;
-         const index = this.humans.indexOf(deadHuman);
-         if (index !== -1) {
-              this.humans.splice(index, 1);
-         }
+        const killPosition = deadHuman.position;
+        const buildingOfVictim = deadHuman.building; // Get the building the human was in
+        const index = this.humans.indexOf(deadHuman);
+        if (index !== -1) {
+            this.humans.splice(index, 1);
+        }
 
-         // Alert nearby living humans
-         if (killer && killer.isPlayer) {
-              const isSilentKill = (killContext === 'knife');
-              this.humans.forEach(livingHuman => {
-                   const distanceToKill = livingHuman.position.distance(killPosition);
-                   if (isSilentKill) {
-                        // Alert if close enough to see/hear the silent kill
-                        if (distanceToKill < 150) {
-                             livingHuman.alert(killPosition, 1, false); // Suspicious
-                        }
-                   } else { // Gunshot or other non-silent kill
-                        // Alert if within gunshot hearing range
-                        if (distanceToKill < 400) {
-                             livingHuman.alert(killPosition, 2, true); // Alerted, gunshot=true
-                        }
-                   }
-              });
-         }
+        // Alert other humans, potentially prioritizing those in the same building
+        if (killer && killer.isPlayer) {
+            const isSilentKill = (killContext === 'knife');
+            this.humans.forEach(livingHuman => {
+                const distanceToKill = livingHuman.position.distance(killPosition);
+                const isInSameBuilding = livingHuman.building === buildingOfVictim;
 
-         // Check if settlement is now cleared
-         if (this.humans.length === 0 && !this.cleared) {
-              this.clearSettlement();
-         }
-    }
+                let alertRange = isSilentKill ? (isInSameBuilding ? 150 : 50) : (isInSameBuilding ? 400 : 200);
+                let alertLevel = isSilentKill ? 1 : 2;
+                let isGunshotAlert = !isSilentKill;
+
+                if (distanceToKill < alertRange) {
+                    livingHuman.alert(killPosition, alertLevel, isGunshotAlert);
+                }
+            });
+        }
+
+        if (this.humans.length === 0 && !this.cleared) {
+            this.clearSettlement();
+        }
+    };
 
 
     clearSettlement() {
-        this.cleared = true;
-        this.updateScoreCallback(this.plasmaReward); // Call callback to update score
-        this.spawnSettlementCallback(); // Call callback to spawn a new settlement
+        // this.cleared = true; // Keep settlement active
+        this.updateScoreCallback(this.plasmaReward);
+        this.spawnSettlementCallback(); // Still spawn the next one? Assumed yes for now.
+    };
+
+    alertSettlement(alertSourcePosition, isGunshot = false) {
+        console.log(`Settlement at ${this.position.x.toFixed(0)},${this.position.y.toFixed(0)} alerted!`);
+        this.alarmState = 'alerted';
+        // Alert humans based on proximity and whether it was a gunshot
+        this.humans.forEach(human => {
+            const distance = human.position.distance(alertSourcePosition);
+            const alertRange = isGunshot ? 500 : 250; // Larger range for gunshots
+            if (distance < alertRange) {
+                const alertLevel = isGunshot ? 2 : 1;
+                human.alert(alertSourcePosition, alertLevel, isGunshot);
+            }
+        });
+    };
+
+    notifyAlliesOfAlert(sourceHuman, alertLevel = 2) {
+        const notificationRadius = 250; // How far the alert spreads
+        const sourceHumanPosition = sourceHuman.position;
+        const sourceBuilding = sourceHuman.building;
+
+        this.humans.forEach(otherHuman => {
+            // Don't alert self, or if already alerted at this level or higher
+            if (otherHuman === sourceHuman || otherHuman.alertLevel >= alertLevel) return;
+
+            const distance = otherHuman.position.distance(sourceHumanPosition);
+            const isInSameBuilding = otherHuman.building === sourceBuilding;
+
+            // Alert if close enough, potentially prioritize same building
+            if (distance < notificationRadius) {
+                 // Maybe make alert level slightly lower if not in the same building?
+                 const effectiveAlertLevel = isInSameBuilding ? alertLevel : Math.max(1, alertLevel -1);
+                 otherHuman.alert(sourceHumanPosition, effectiveAlertLevel, false); // Assume non-gunshot for ally alerts
+            }
+        });
+    };
+
+    // Method to find the closest door to a point (e.g., for player interaction)
+    findClosestDoor(point, maxDistance = 50) {
+        let closestDoor = null;
+        let minDistanceSq = maxDistance * maxDistance;
+
+        this.buildings.forEach(building => {
+            building.doors.forEach(door => {
+                const distSq = point.distanceSq(door.position);
+                if (distSq < minDistanceSq) {
+                    minDistanceSq = distSq;
+                    closestDoor = door;
+                }
+            });
+        });
+        return closestDoor;
     }
 
-    // Alert all humans in this settlement
-    alertSettlement(alertSourcePosition, isGunshot = false) {
-         this.humans.forEach(human => {
-              const alertLevel = isGunshot ? 2 : 1;
-              human.alert(alertSourcePosition, alertLevel, isGunshot);
-         });
+    // Method to get ALL doors (open or closed) from all buildings
+    getAllStructureDoors() {
+        let allDoors = [];
+        this.buildings.forEach(building => {
+            allDoors = allDoors.concat(building.doors); // Assumes Building has a 'doors' array
+        });
+        return allDoors;
     }
-}
+
+    // Method to find the closest interactable chest to a point
+    findClosestChest(point, maxDistance = 50) {
+        let closestChest = null;
+        let minDistanceSq = maxDistance * maxDistance;
+
+        this.buildings.forEach(building => {
+            // Iterate through chests associated with the building (assuming building.chests exists)
+            // Or iterate through the settlement's main chest list if they aren't tied to buildings
+            // Let's assume chests are stored directly in the settlement for now based on constructor
+            this.chests.forEach(chest => {
+                if (chest.isInteractable) { // Only consider chests that can be interacted with
+                    const distSq = point.distanceSq(chest.position);
+                    if (distSq < minDistanceSq) {
+                        minDistanceSq = distSq;
+                        closestChest = chest;
+                    }
+                }
+            });
+        });
+        return closestChest;
+    }
+
+    // Note: Chests are not currently added to getActiveObstacles as they aren't collision obstacles.
+    // If they needed to block pathfinding, they'd need to be added there.
+
+} // End of class Settlement

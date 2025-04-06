@@ -1,6 +1,7 @@
-import { Vector2, lineIntersectsRect } from './utils.js';
-import { Player, Projectile, isLineOfSightClear } from './entities.js';
+import { Vector2, lineIntersectsRect, isLineOfSightClear } from './utils.js';
+import { Player, Projectile, Item, Chest } from './entities.js'; // Import Item and Chest
 import { Settlement } from './settlement.js';
+import { Door } from './structures.js'; // Import Door
 
 document.addEventListener('DOMContentLoaded', () => {
     // --- DOM Elements ---
@@ -11,10 +12,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const gameOverScreen = document.getElementById('game-over-screen');
     const canvas = document.getElementById('game-canvas');
     const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false; // Disable image smoothing for pixel art
+    const minimapCanvas = document.getElementById('minimap-canvas'); // Get minimap canvas
+    const minimapCtx = minimapCanvas ? minimapCanvas.getContext('2d') : null; // Get minimap context
     const healthFill = document.getElementById('health-fill');
     const plasmaScoreDisplay = document.getElementById('plasma-score');
     const finalPlasmaScoreDisplay = document.getElementById('final-plasma-score');
     const weaponDisplay = document.getElementById('weapon-display');
+    const rollIndicator = document.getElementById('roll-indicator'); // Get roll indicator element
 
     // --- Game State Variables ---
     let gameActive = false;
@@ -22,84 +27,121 @@ document.addEventListener('DOMContentLoaded', () => {
     let player;
     let settlements = [];
     let projectiles = [];
+    let items = []; // Array to hold spawned items
     let plasmaScore = 0;
     let worldWidth = 3000;
     let worldHeight = 3000;
     let camera = { x: 0, y: 0 };
     let mousePos = { x: 0, y: 0 };
-    // let mouseClick = false; // mouseClick state is handled directly in event listener
 
     // --- Input State ---
-    const keys = { w: false, a: false, s: false, d: false, shift: false, e: false };
+    // Add interact key ('f' by default in Player class)
+    const keys = { w: false, a: false, s: false, d: false, shift: false, e: false, space: false, f: false };
+
+    // --- Assets ---
+    const groundTile = new Image();
+    groundTile.src = 'assets/ground/ground_tile_standard.png'; // Path relative to index.html
+    let groundPattern = null; // Will be created once image loads
+
+    groundTile.onload = () => {
+        if (ctx) { // Ensure context exists
+            groundPattern = ctx.createPattern(groundTile, 'repeat');
+        }
+    };
+    groundTile.onerror = () => {
+        console.error("Failed to load ground tile image.");
+    };
+
+    // --- Player Assets ---
+    const playerImgStandard = new Image();
+    playerImgStandard.src = 'assets/player/standard_player.png';
+    playerImgStandard.onerror = () => console.error("Failed to load standard_player image.");
+
+    const playerImgIdle2 = new Image();
+    playerImgIdle2.src = 'assets/player/idle_down_2.png';
+    playerImgIdle2.onerror = () => console.error("Failed to load idle_down_2 image.");
 
     // --- Game Initialization ---
     function initGame() {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
+
+        // Set minimap canvas dimensions based on CSS (or fixed size)
+        if (minimapCanvas) {
+            minimapCanvas.width = 150; // Match CSS width
+            minimapCanvas.height = 150; // Match CSS height
+        }
+
         worldWidth = Math.max(3000, canvas.width * 3);
         worldHeight = Math.max(3000, canvas.height * 3);
 
-        // Pass world dimensions to Player constructor
-        player = new Player(new Vector2(worldWidth / 2, worldHeight / 2), worldWidth, worldHeight);
+        // Pass world dimensions and images to Player constructor
+        player = new Player(
+            new Vector2(worldWidth / 2, worldHeight / 2),
+            worldWidth,
+            worldHeight,
+            playerImgStandard, // Pass standard image
+            playerImgIdle2     // Pass idle frame 2 image
+        );
         settlements = [];
         projectiles = [];
+        items = []; // Clear items array on game start
         plasmaScore = 0;
         updateScoreDisplay(); // Update display initially
 
-        // Spawn initial settlements
-        for (let i = 0; i < 8; i++) {
-            spawnSettlement();
+        // Spawn the single initial settlement
+        settlements = []; // Ensure it's empty before spawning
+        spawnSettlement();
+
+        if (settlements.length === 0) {
+             console.error("Failed to spawn initial settlement. Game cannot start.");
+             // Optionally show an error message to the user
+             showScreen(menuScreen); // Go back to menu
+             return;
         }
+
 
         gameActive = true;
         lastTime = performance.now();
         requestAnimationFrame(gameLoop);
     }
 
-    // --- Settlement Spawning ---
+    // --- Settlement Spawning (Now only spawns one) ---
     function spawnSettlement() {
-        const minRadius = 120, maxRadius = 250;
-        const radius = Math.random() * (maxRadius - minRadius) + minRadius;
-        const numHumans = Math.floor(radius / 75) + (Math.random() > 0.5 ? 3 : 2);
-        let position;
-        let attempts = 0;
-        const maxAttempts = 20;
+        // Simplified: Place the single settlement somewhat centrally but with some randomness
+        const placementMargin = 500; // Margin from world edges
+        const position = new Vector2(
+             placementMargin + Math.random() * (worldWidth - placementMargin * 2),
+             placementMargin + Math.random() * (worldHeight - placementMargin * 2)
+        );
+        const radius = 300; // Fixed radius, less meaningful now but kept for structure
+        const numHumans = 10; // Fixed number of humans for the single large building
 
-        do {
-            position = new Vector2(
-                Math.random() * (worldWidth - radius * 2) + radius,
-                Math.random() * (worldHeight - radius * 2) + radius
-            );
-            attempts++;
-            if (attempts > maxAttempts) {
-                 console.warn("Could not find suitable position for new settlement after", maxAttempts, "attempts.");
-                 return; // Stop if no position found
-            }
-        } while (isPositionTooClose(position, radius));
+        // Get existing buildings (will be empty on first call)
+        const existingBuildings = settlements.flatMap(s => s.buildings);
 
         // Pass world dimensions and necessary callbacks to Settlement constructor
-        settlements.push(new Settlement(
+        // Removed type, pass empty array for existingBuildings initially
+        const newSettlement = new Settlement(
             position,
             radius,
             numHumans,
             worldWidth,
             worldHeight,
-            spawnSettlement, // Callback for when cleared
-            updateScore // Callback to update score
-        ));
+            () => { console.log("Settlement cleared!"); /* No respawn needed for single settlement */ },
+            updateScore, // Callback to update score
+            existingBuildings // Pass buildings from previous settlements (if any)
+        );
+
+        // Only add if the settlement constructor didn't fail (e.g., due to placement issues)
+        if (!newSettlement.cleared) {
+             settlements.push(newSettlement);
+        } else {
+             console.error("Settlement constructor indicated failure, not adding to game.");
+        }
     }
 
-    function isPositionTooClose(position, radius) {
-         // Check distance from player
-         if (player && position.distance(player.position) < 500) return true;
-         // Check distance from existing, uncleared settlements
-         for (const s of settlements) {
-              if (!s.cleared && position.distance(s.position) < s.radius + radius + 200) {
-                   return true; // Too close to another settlement
-              }
-         }
-         return false; // Position is okay
-    }
+    // isPositionTooClose is no longer needed as overlap is handled in Settlement constructor
 
     // --- Score Management ---
     function updateScore(amount) {
@@ -119,33 +161,58 @@ document.addEventListener('DOMContentLoaded', () => {
         lastTime = timestamp;
 
         // --- Update ---
-        // Pass necessary dependencies to player update
-        player.update(deltaTime, keys, settlements, healthFill, weaponDisplay);
- 
-        // Pass necessary dependencies to settlement update (which passes them to human update)
-        settlements.forEach(settlement => settlement.update(deltaTime, player, isLineOfSightClear, projectiles)); // Pass projectiles
- 
-        // Pass necessary dependencies to projectile update
-        projectiles.forEach(p => p.update(deltaTime, settlements, player, gameOver)); // Pass gameOver callback
-        projectiles = projectiles.filter(p => p.lifeTime > 0); // Remove dead projectiles
- 
+        // Pass projectiles to player update
+        player.update(deltaTime, keys, settlements, healthFill, weaponDisplay, projectiles);
+
+        // Pass player, LoS func, and projectiles to settlement update
+        settlements.forEach(settlement => settlement.update(deltaTime, player, isLineOfSightClear, projectiles)); // Already passing player here
+
+        // Projectile update signature is correct
+        projectiles.forEach(p => p.update(deltaTime, settlements, player, gameOver));
+        projectiles = projectiles.filter(p => p.lifeTime > 0);
+
+        // Update items (currently does nothing, but good practice)
+        items.forEach(item => item.update(deltaTime));
+
+        // Check for item pickup
+        for (let i = items.length - 1; i >= 0; i--) {
+            const item = items[i];
+            if (player.position.distance(item.position) < player.size.x / 2 + item.pickupRadius) {
+                if (item.itemType === 'Plasma') {
+                    updateScore(item.quantity); // Update score for Plasma
+                    console.log(`Picked up ${item.quantity} Plasma.`);
+                    items.splice(i, 1); // Remove item from game world
+                }
+                // Add logic for other item types here if needed
+            }
+        }
+
         updateCamera();
 
         // --- Draw ---
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         drawBackground(ctx, camera);
 
-        // Draw settlements (which draw their obstacles and humans)
-        settlements.forEach(settlement => settlement.draw(ctx, camera));
+        // Pass player to settlement draw to handle inside/outside view
+        settlements.forEach(settlement => settlement.draw(ctx, camera, player)); // Already passing player here
 
         // Draw projectiles
         projectiles.forEach(p => p.draw(ctx, camera));
 
-        // Draw player
+        // Draw items
+        items.forEach(item => item.draw(ctx, camera));
+
         player.draw(ctx, camera);
+
+        // Update HUD elements (including dash indicator)
+        updateHUD();
+
+        // Draw the minimap
+        drawMinimap();
 
         requestAnimationFrame(gameLoop); // Continue the loop
     }
+
 
     // --- Camera and Background ---
     function updateCamera() {
@@ -156,12 +223,30 @@ document.addEventListener('DOMContentLoaded', () => {
         camera.y = Math.max(0, Math.min(worldHeight - canvas.height, camera.y));
     }
 
+    // Removed time parameter from drawBackground definition
     function drawBackground(ctx, camera) {
-        // Fallback solid color
-        ctx.fillStyle = '#4d1a00'; // Dark reddish-brown
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Draw tiled ground first
+        if (groundPattern) {
+            ctx.save(); // Save context state
+            ctx.fillStyle = groundPattern;
+            // Translate the pattern origin based on camera position for seamless tiling
+            ctx.translate(-camera.x % groundTile.width, -camera.y % groundTile.height);
+            // Fill the entire canvas area, extending slightly beyond to ensure coverage during movement
+            ctx.fillRect(
+                (camera.x % groundTile.width) - groundTile.width,
+                (camera.y % groundTile.height) - groundTile.height,
+                canvas.width + groundTile.width * 2,
+                canvas.height + groundTile.height * 2
+            );
+            ctx.restore(); // Restore context state
+        } else {
+            // Fallback solid color if pattern not ready
+            ctx.fillStyle = '#4d1a00'; // Dark reddish-brown
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
 
-        // Draw stars
+
+        // Draw stars over the ground
         ctx.fillStyle = 'rgba(255, 255, 200, 0.6)'; // Pale yellow stars
         const starCount = 150; // Adjust density as needed
         // Use a simple pseudo-random distribution based on index for consistency
@@ -180,6 +265,65 @@ document.addEventListener('DOMContentLoaded', () => {
                   ctx.fillRect(screenX, screenY, 2, 2); // Small square stars
              }
         }
+
+        // Removed call to drawDustClouds
+    }
+
+    // Removed drawDustClouds function definition
+
+    // --- Minimap Drawing ---
+    function drawMinimap() {
+        if (!minimapCtx || !player) return; // Ensure context and player exist
+
+        const mapWidth = minimapCanvas.width;
+        const mapHeight = minimapCanvas.height;
+        const scaleX = mapWidth / worldWidth;
+        const scaleY = mapHeight / worldHeight;
+
+        // Clear minimap
+        minimapCtx.fillStyle = 'rgba(10, 10, 10, 0.8)'; // Dark background
+        minimapCtx.fillRect(0, 0, mapWidth, mapHeight);
+
+        // Draw settlements (buildings)
+        minimapCtx.fillStyle = '#888888'; // Grey for buildings
+        settlements.forEach(settlement => {
+            settlement.buildings.forEach(building => {
+                const mapX = building.position.x * scaleX;
+                const mapY = building.position.y * scaleY;
+                const mapW = building.size.x * scaleX; // Use building.size.x
+                const mapH = building.size.y * scaleY; // Use building.size.y
+                minimapCtx.fillRect(mapX, mapY, Math.max(1, mapW), Math.max(1, mapH)); // Ensure at least 1px size
+            });
+        });
+
+        // Draw player
+        minimapCtx.fillStyle = '#ff3a3a'; // Red for player (matches health bar)
+        const playerMapX = player.position.x * scaleX;
+        const playerMapY = player.position.y * scaleY;
+        minimapCtx.beginPath();
+        minimapCtx.arc(playerMapX, playerMapY, 3, 0, Math.PI * 2); // Draw a small circle for the player
+        minimapCtx.fill();
+
+        // Optional: Draw camera view rectangle (can be complex, skip for now)
+    }
+
+
+    // --- HUD Update ---
+    function updateHUD() {
+        // Update roll indicator based on cooldown
+        if (player && rollIndicator) {
+            if (player.dashCooldownTimer <= 0) { // Use dashCooldownTimer (assuming cooldown logic remains the same)
+                rollIndicator.classList.add('ready');
+                rollIndicator.classList.remove('cooldown');
+                rollIndicator.textContent = 'ROLL READY'; // Update text
+            } else {
+                rollIndicator.classList.add('cooldown');
+                rollIndicator.classList.remove('ready');
+                // Display remaining cooldown time (optional)
+                rollIndicator.textContent = `ROLL (${player.dashCooldownTimer.toFixed(1)}s)`; // Update text and use dashCooldownTimer
+            }
+        }
+        // Health and weapon are updated within Player.update, score updated via callback
     }
 
     // --- Screen Management ---
@@ -202,11 +346,28 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Event Listeners ---
     window.addEventListener('keydown', (e) => {
         const key = e.key.toLowerCase();
-        if (key in keys) keys[key] = true;
+        if (gameActive && player) { // Only process keys if game is active
+            if (e.key === ' ') { // Handle space specifically
+                keys.space = true;
+            } else if (key === player.interactKey) { // Use player's interact key
+                keys[key] = true;
+                handleInteraction(); // Call interaction logic on key down
+            } else if (key in keys) { // Handle other tracked keys (w,a,s,d,shift,e)
+                keys[key] = true;
+            }
+        }
     });
     window.addEventListener('keyup', (e) => {
         const key = e.key.toLowerCase();
-        if (key in keys) keys[key] = false;
+        if (gameActive && player) { // Only process keys if game is active
+            if (e.key === ' ') { // Handle space specifically
+                keys.space = false;
+            } else if (key === player.interactKey) {
+                 keys[key] = false; // Reset interaction key state on key up
+            } else if (key in keys) { // Handle other tracked keys
+                keys[key] = false;
+            }
+        }
     });
 
     canvas.addEventListener('mousemove', (e) => {
@@ -243,6 +404,58 @@ document.addEventListener('DOMContentLoaded', () => {
     startButton.addEventListener('click', startGame);
     retryButton.addEventListener('click', startGame);
 
-    // Show the menu screen initially (optional, could be handled by CSS)
-    // showScreen(menuScreen);
+        // Show the menu screen initially (optional, could be handled by CSS)
+        // showScreen(menuScreen);
+
+    // --- Interaction Handling ---
+    function handleInteraction() {
+        if (!gameActive || !player || !player.settlement) return; // Ensure player is in a settlement
+
+        const interactionReach = 60; // Increased reach slightly
+        let closestInteractable = null;
+        let minDistanceSq = interactionReach * interactionReach;
+
+        const currentSettlement = player.settlement; // Use the settlement the player is currently in
+
+        // Find the closest door AND closest chest within reach independently
+        const closestDoor = currentSettlement.findClosestDoor(player.position, interactionReach);
+        const closestChest = currentSettlement.findClosestChest(player.position, interactionReach);
+
+        let doorDistSq = Infinity;
+        let chestDistSq = Infinity;
+
+        if (closestDoor) {
+            doorDistSq = player.position.distanceSq(closestDoor.position);
+        }
+        if (closestChest) {
+            chestDistSq = player.position.distanceSq(closestChest.position);
+        }
+
+        // Determine which one is actually closer
+        if (doorDistSq < chestDistSq && doorDistSq <= minDistanceSq) {
+            closestInteractable = closestDoor;
+        } else if (chestDistSq < doorDistSq && chestDistSq <= minDistanceSq) {
+            closestInteractable = closestChest;
+        } else {
+            closestInteractable = null; // Neither is close enough or exists
+        }
+
+        // Perform interaction if a target was found
+        if (closestInteractable) {
+            const interactionResult = closestInteractable.interact(player); // Call interact on the specific entity
+
+            if (closestInteractable instanceof Chest && interactionResult && interactionResult.itemSpawned) {
+                // Chest interaction resulted in spawning an item
+                const details = interactionResult.itemSpawned;
+                const newItem = new Item(details.position, details.type, details.quantity);
+                items.push(newItem); // Add the spawned item to the game world
+                console.log(`Chest opened, spawned ${details.quantity} ${details.type}`);
+            } else if (closestInteractable instanceof Door) {
+                console.log("Toggled door.");
+                // No further action needed here, door state changed internally
+            } else if (closestInteractable instanceof Chest) {
+                 console.log("Chest opened (empty or already open).");
+            }
+        }
+    }
 });

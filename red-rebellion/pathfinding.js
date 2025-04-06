@@ -1,4 +1,5 @@
 import { Vector2 } from './utils.js';
+import { Door } from './structures.js'; // Import Door class
 
 class PathNode {
     constructor(x, y, parent = null, gCost = 0, hCost = 0) {
@@ -39,25 +40,37 @@ export function findPath(startWorldPos, endWorldPos, obstacles, worldBounds, gri
     // Create the grid and mark obstacles
     const grid = Array(gridWidth).fill(null).map(() => Array(gridHeight).fill(true)); // true = walkable
 
+    // --- Mark Obstacles on Grid ---
+    // Treat all provided obstacles (walls, closed doors) as unwalkable areas, *except* for Doors
     obstacles.forEach(obs => {
+        // --- MODIFICATION START: Skip Doors for pathfinding grid ---
+        if (obs instanceof Door) {
+            return; // Don't mark grid cells for doors
+        }
+        // --- MODIFICATION END ---
+
         const obsRect = obs.getRectData();
+        // Calculate grid cell range covered by the obstacle
         const startX = Math.floor((obsRect.x - obsRect.width / 2) / gridSize);
         const endX = Math.floor((obsRect.x + obsRect.width / 2) / gridSize);
         const startY = Math.floor((obsRect.y - obsRect.height / 2) / gridSize);
         const endY = Math.floor((obsRect.y + obsRect.height / 2) / gridSize);
 
+        // Mark all grid cells within the obstacle's bounds as unwalkable
         for (let x = startX; x <= endX; x++) {
             for (let y = startY; y <= endY; y++) {
-                const gridX = x - minGridX;
+                const gridX = x - minGridX; // Convert world grid index to local grid index
                 const gridY = y - minGridY;
+                // Ensure the cell is within the calculated grid bounds
                 if (gridX >= 0 && gridX < gridWidth && gridY >= 0 && gridY < gridHeight) {
                     grid[gridX][gridY] = false; // Mark as unwalkable
                 }
             }
         }
     });
+    // --- End Mark Obstacles ---
 
-    // Adjust start/end nodes if they fall inside an obstacle (find nearest walkable)
+    // Adjust start/end nodes if they fall on an unwalkable cell (find nearest walkable)
     function findNearestWalkable(nodeX, nodeY) {
         if (nodeX >= 0 && nodeX < gridWidth && nodeY >= 0 && nodeY < gridHeight && grid[nodeX][nodeY]) {
             return { x: nodeX, y: nodeY };
@@ -126,12 +139,13 @@ export function findPath(startWorldPos, endWorldPos, obstacles, worldBounds, gri
                 const worldX = (temp.x + minGridX) * gridSize + gridSize / 2;
                 const worldY = (temp.y + minGridY) * gridSize + gridSize / 2;
                 path.push(new Vector2(worldX, worldY));
-                temp = temp.parent;
+                    temp = temp.parent;
+                }
+                const finalPath = path.reverse(); // Return world coordinate path
+                return finalPath;
             }
-            return path.reverse(); // Return world coordinate path
-        }
 
-        // Get neighbors (including diagonals)
+            // Get neighbors (including diagonals)
         const neighbors = [];
         for (let x = -1; x <= 1; x++) {
             for (let y = -1; y <= 1; y++) {
