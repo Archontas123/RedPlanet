@@ -29,10 +29,11 @@ export class ItemDrop extends Entity {
     draw(ctx, camera) {
         ctx.fillStyle = this.color;
         ctx.beginPath();
+        // Draw at world position, scale radius inversely with zoom
         ctx.arc(
-            this.position.x - camera.x,
-            this.position.y - camera.y,
-            this.size.x / 2,
+            this.position.x, // Removed - camera.x
+            this.position.y, // Removed - camera.y
+            (this.size.x / 2) / camera.zoom, // Scale radius
             0, Math.PI * 2
         );
         ctx.fill();

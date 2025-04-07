@@ -284,3 +284,108 @@ button:hover {
     padding: 0.8rem 1.5rem;
     font-size: 1rem;
 }
+
+/* --- Depot GUI Styles --- */
+.gui-screen { /* General class for GUI overlays, shares properties with inventory */
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(10, 10, 10, 0.9);
+    border: 3px solid #ff3a3a;
+    border-radius: 10px;
+    padding: 20px;
+    z-index: 20; /* Above HUD */
+    display: none; /* Hidden by default */
+    flex-direction: column;
+    align-items: center;
+    box-shadow: 0 0 20px rgba(255, 58, 58, 0.5);
+    overflow-y: auto; /* Allow scrolling if content overflows */
+}
+
+#depot-gui-screen {
+    width: 90%; /* Wider than inventory */
+    max-width: 800px;
+    max-height: 85%;
+}
+
+#depot-gui-screen.active {
+    display: flex; /* Show when active */
+}
+
+#depot-gui-screen h2 {
+    color: #ff7b7b;
+    margin-bottom: 20px;
+    font-size: 1.8rem;
+}
+
+.depot-container {
+    display: flex;
+    justify-content: space-around; /* Space out the two panels */
+    width: 100%;
+    margin-bottom: 20px;
+    gap: 20px; /* Add gap between panels */
+}
+
+.inventory-panel {
+    flex: 1; /* Each panel takes equal space */
+    background-color: rgba(26, 26, 26, 0.5); /* Slightly lighter background */
+    border-radius: 5px;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.inventory-panel h3 {
+    color: #ccc;
+    margin-bottom: 15px;
+    font-size: 1.2rem;
+}
+
+/* Use existing inventory-grid style for the grids inside panels */
+#depot-player-inventory-grid,
+#depot-storage-inventory-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 10px; /* Slightly smaller gap */
+    width: 100%;
+    min-height: 100px; /* Ensure panels have some height */
+}
+
+/* Style for individual slots within the depot GUI */
+.depot-slot {
+    width: 80px;
+    height: 80px;
+    background-color: rgba(50, 50, 50, 0.7);
+    border: 1px solid #555;
+    border-radius: 5px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    font-size: 0.8rem;
+    color: #ccc;
+    cursor: pointer; /* Make slots clickable */
+    transition: background-color 0.2s;
+}
+
+.depot-slot:hover {
+    background-color: rgba(80, 80, 80, 0.9);
+}
+
+.depot-slot img {
+    max-width: 50px;
+    max-height: 50px;
+    margin-bottom: 5px;
+    image-rendering: pixelated;
+}
+
+/* Use existing item-name and item-count styles */
+
+#close-depot-gui-button {
+    margin-top: auto; /* Push button to the bottom */
+    padding: 0.8rem 1.5rem;
+    font-size: 1rem;
+}

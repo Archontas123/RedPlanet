@@ -95,22 +95,24 @@ export class Entity {
     }
 
     draw(ctx, camera) {
+        // Draw the entity's basic rectangle representation at its world position
         ctx.fillStyle = this.color;
         ctx.fillRect(
-            this.position.x - this.size.x / 2 - camera.x,
-            this.position.y - this.size.y / 2 - camera.y,
+            this.position.x - this.size.x / 2, // Removed - camera.x
+            this.position.y - this.size.y / 2, // Removed - camera.y
             this.size.x,
             this.size.y
         );
 
+        // Draw health bar if needed, scaling UI elements inversely with zoom
         if (this.health < this.maxHealth && this.health > 0) {
-            const barWidth = this.size.x;
-            const barHeight = 5;
-            const barX = this.position.x - barWidth / 2 - camera.x;
-            const barY = this.position.y - this.size.y / 2 - barHeight - 5 - camera.y;
+            const barWidth = this.size.x; // Keep width relative to entity size
+            const barHeight = 5 / camera.zoom; // Scale height based on zoom
+            const barX = this.position.x - barWidth / 2; // Removed - camera.x
+            const barY = this.position.y - this.size.y / 2 - barHeight - (5 / camera.zoom); // Removed - camera.y, adjust offset
 
             ctx.fillStyle = 'rgba(0,0,0,0.7)';
-            ctx.fillRect(barX, barY, barWidth, barHeight);
+            ctx.fillRect(barX, barY, barWidth, barHeight); // Use world coords for position
             ctx.fillStyle = this.isPlayer ? '#00ff00' : '#ff0000';
             ctx.fillRect(barX, barY, (barWidth * this.health) / this.maxHealth, barHeight);
         }
@@ -130,7 +132,15 @@ export class Entity {
             x: this.position.x,
             y: this.position.y,
             width: this.size.x,
-            height: this.size.y
-        };
-    }
-}
+             height: this.size.y
+         };
+     }
+
+     // Get the Y coordinate for depth sorting (bottom of the entity)
+     getSortY() {
+         // Default assumes drawing is centered vertically on position.y
+         // Override in subclasses if drawing anchor is different (e.g., bottom-anchored sprites)
+         // Subtract epsilon for sort stability against player
+         return this.position.y + this.size.y / 2 - 0.01;
+     }
+ }

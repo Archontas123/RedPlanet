@@ -13,21 +13,23 @@ export class Stairs {
     }
 
     draw(ctx, camera) {
+        // Draw base at world position
         ctx.fillStyle = this.color;
         ctx.fillRect(
-            this.position.x - this.size.x / 2 - camera.x,
-            this.position.y - this.size.y / 2 - camera.y,
+            this.position.x - this.size.x / 2, // Removed - camera.x
+            this.position.y - this.size.y / 2, // Removed - camera.y
             this.size.x,
             this.size.y
         );
+        // Draw steps, scaling line width
         ctx.strokeStyle = 'black';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2 / camera.zoom; // Scale line width
         const numSteps = 4;
         for (let i = 1; i < numSteps; i++) {
             const yOffset = (i / numSteps - 0.5) * this.size.y;
             ctx.beginPath();
-            ctx.moveTo(this.position.x - this.size.x / 2 - camera.x, this.position.y + yOffset - camera.y);
-            ctx.lineTo(this.position.x + this.size.x / 2 - camera.x, this.position.y + yOffset - camera.y);
+            ctx.moveTo(this.position.x - this.size.x / 2, this.position.y + yOffset); // Removed - camera.x/y
+            ctx.lineTo(this.position.x + this.size.x / 2, this.position.y + yOffset); // Removed - camera.x/y
             ctx.stroke();
         }
     }

@@ -1,4 +1,4 @@
-import { Entity } from './Entity.js';
+  import { Entity } from './Entity.js';
 import { Vector2 } from '../utils.js';
 
 export class Item extends Entity {
@@ -24,14 +24,15 @@ export class Item extends Entity {
     }
 
     draw(ctx, camera) {
+        // Draw diamond shape at world position
         ctx.fillStyle = this.color;
         ctx.beginPath();
         const halfW = this.size.x / 2;
         const halfH = this.size.y / 2;
-        ctx.moveTo(this.position.x - camera.x, this.position.y - halfH - camera.y);
-        ctx.lineTo(this.position.x + halfW - camera.x, this.position.y - camera.y);
-        ctx.lineTo(this.position.x - camera.x, this.position.y + halfH - camera.y);
-        ctx.lineTo(this.position.x - halfW - camera.x, this.position.y - camera.y);
+        ctx.moveTo(this.position.x, this.position.y - halfH); // Removed - camera.x/y
+        ctx.lineTo(this.position.x + halfW, this.position.y); // Removed - camera.x/y
+        ctx.lineTo(this.position.x, this.position.y + halfH); // Removed - camera.x/y
+        ctx.lineTo(this.position.x - halfW, this.position.y); // Removed - camera.x/y
         ctx.closePath();
         ctx.fill();
     }

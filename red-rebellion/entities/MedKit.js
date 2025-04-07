@@ -22,34 +22,38 @@ export class MedKit extends Entity {
     }
 
     draw(ctx, camera) {
+        // Draw base at world position
         ctx.fillStyle = this.color;
         ctx.fillRect(
-            this.position.x - this.size.x / 2 - camera.x,
-            this.position.y - this.size.y / 2 - camera.y,
+            this.position.x - this.size.x / 2, // Removed - camera.x
+            this.position.y - this.size.y / 2, // Removed - camera.y
             this.size.x,
             this.size.y
         );
+        // Draw cross if not opened, scaling thickness inversely with zoom
         if (!this.opened) {
             ctx.fillStyle = '#ff0000';
-            const crossThickness = this.size.x / 5;
+            const crossThickness = (this.size.x / 5) / camera.zoom; // Scale thickness
+            const scaledCrossOffset = crossThickness * camera.zoom; // Use original scale for positioning relative to size
             ctx.fillRect(
-                this.position.x - crossThickness / 2 - camera.x,
-                this.position.y - this.size.y / 2 + crossThickness - camera.y,
+                this.position.x - crossThickness / 2, // Removed - camera.x
+                this.position.y - this.size.y / 2 + scaledCrossOffset, // Removed - camera.y, adjust offset
                 crossThickness,
-                this.size.y - crossThickness * 2
+                this.size.y - scaledCrossOffset * 2
             );
             ctx.fillRect(
-                this.position.x - this.size.x / 2 + crossThickness - camera.x,
-                this.position.y - crossThickness / 2 - camera.y,
-                this.size.x - crossThickness * 2,
+                this.position.x - this.size.x / 2 + scaledCrossOffset, // Removed - camera.x, adjust offset
+                this.position.y - crossThickness / 2, // Removed - camera.y
+                this.size.x - scaledCrossOffset * 2,
                 crossThickness
             );
         }
+        // Draw border, scaling line width
         ctx.strokeStyle = '#888888';
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 1 / camera.zoom; // Scale line width
         ctx.strokeRect(
-            this.position.x - this.size.x / 2 - camera.x,
-            this.position.y - this.size.y / 2 - camera.y,
+            this.position.x - this.size.x / 2, // Removed - camera.x
+            this.position.y - this.size.y / 2, // Removed - camera.y
             this.size.x,
             this.size.y
         );

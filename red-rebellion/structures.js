@@ -3,6 +3,7 @@ export { Stairs } from './structures/Stairs.js';
 export { Door } from './structures/Door.js';
 export { Room } from './structures/Room.js';
 export { Building } from './structures/Building.js';
+export { StorageDepot } from './structures/StorageDepot.js'; // Export StorageDepot
 
 // Constants (can be kept here or moved to a dedicated constants file if preferred)
 export const WALL_THICKNESS = 15;

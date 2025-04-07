@@ -584,31 +584,36 @@ export class Human extends Entity {
 
 
     draw(ctx, camera) {
+         // super.draw needs to be fixed in Entity.js as well
          super.draw(ctx, camera);
+
+         // Draw alert indicators relative to position, scaling font/offset inversely with zoom
+         const fontSize = 18 / camera.zoom;
+         const yOffset = -this.size.y / 2 - (10 / camera.zoom);
 
          if (this.alertLevel === 1) {
               ctx.fillStyle = 'yellow';
-              ctx.font = 'bold 18px Orbitron';
+              ctx.font = `bold ${fontSize}px Orbitron`;
               ctx.textAlign = 'center';
-              ctx.fillText('?', this.position.x - camera.x, this.position.y - camera.y - this.size.y / 2 - 10);
-              ctx.textAlign = 'left';
+              ctx.fillText('?', this.position.x, this.position.y + yOffset); // Removed - camera.x/y
+              ctx.textAlign = 'left'; // Reset alignment
          } else if (this.alertLevel === 2) {
               ctx.fillStyle = 'red';
-              ctx.font = 'bold 18px Orbitron';
+              ctx.font = `bold ${fontSize}px Orbitron`;
               ctx.textAlign = 'center';
-              ctx.fillText('!', this.position.x - camera.x, this.position.y - camera.y - this.size.y / 2 - 10);
-              ctx.textAlign = 'left';
+              ctx.fillText('!', this.position.x, this.position.y + yOffset); // Removed - camera.x/y
+              ctx.textAlign = 'left'; // Reset alignment
          }
 
          if (this.gunFlashTimer > 0) {
-             const flashSize = 12;
+             const flashSize = 12 / camera.zoom; // Scale flash size
              const direction = this.viewDirection.magnitudeSq() > 0 ? this.viewDirection : new Vector2(0, -1);
-             const flashX = this.position.x + direction.x * (this.size.x / 2 + 5) - camera.x;
-             const flashY = this.position.y + direction.y * (this.size.y / 2 + 5) - camera.y;
+             const flashX = this.position.x + direction.x * (this.size.x / 2 + (5 / camera.zoom)); // Removed - camera.x, adjust offset
+             const flashY = this.position.y + direction.y * (this.size.y / 2 + (5 / camera.zoom)); // Removed - camera.y, adjust offset
 
              ctx.fillStyle = 'rgba(255, 220, 0, 0.9)';
              ctx.beginPath();
-             ctx.arc(flashX, flashY, flashSize / 2, 0, Math.PI * 2);
+             ctx.arc(flashX, flashY, flashSize / 2, 0, Math.PI * 2); // Use world coords
              ctx.fill();
          }
     }

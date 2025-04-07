@@ -89,7 +89,15 @@ export class Projectile {
     draw(ctx, camera) {
         ctx.fillStyle = this.color;
         ctx.beginPath();
-        ctx.arc(this.position.x - camera.x, this.position.y - camera.y, this.size / 2, 0, Math.PI * 2);
-        ctx.fill();
-    }
-}
+         // Draw at world position, scale radius inversely with zoom
+         ctx.arc(this.position.x, this.position.y, (this.size / 2) / camera.zoom, 0, Math.PI * 2); // Removed - camera.x/y
+         ctx.fill();
+     }
+
+     // Get the Y coordinate for depth sorting (bottom of the projectile)
+     getSortY() {
+         // Since drawing is centered, bottom is position.y + radius
+         // Subtract epsilon for sort stability against player
+         return this.position.y + this.size / 2 - 0.01;
+     }
+ }

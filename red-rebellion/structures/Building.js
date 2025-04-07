@@ -531,41 +531,47 @@ export class Building {
         if (isPlayerInside) {
             if (floor.interiorRect) {
                 ctx.fillStyle = this.interiorColor;
+                // Draw at world coordinates
                 ctx.fillRect(
-                    floor.interiorRect.x - camera.x,
-                    floor.interiorRect.y - camera.y,
+                    floor.interiorRect.x, // Removed - camera.x
+                    floor.interiorRect.y, // Removed - camera.y
                     floor.interiorRect.width,
                     floor.interiorRect.height
                 );
             }
+            // These child draw methods also need checking/fixing
             floor.walls.forEach(wall => wall.draw(ctx, camera));
             floor.doors.forEach(door => door.draw(ctx, camera));
             floor.stairs.forEach(stair => stair.draw(ctx, camera));
             floor.interactables.forEach(interactable => interactable.draw(ctx, camera));
         } else {
+            // Draw exterior at world coordinates
             ctx.fillStyle = this.exteriorColor;
             ctx.fillRect(
-                this.position.x - camera.x,
-                this.position.y - camera.y,
+                this.position.x, // Removed - camera.x
+                this.position.y, // Removed - camera.y
                 this.size.x,
                 this.size.y
             );
 
+            // Draw external door representation if player is outside
             const groundFloor = this.floors[0];
             if (groundFloor && groundFloor.externalDoor) {
                  const door = groundFloor.externalDoor;
                  ctx.fillStyle = door.isOpen ? '#e2c49c' : '#b0623d';
+                 // Draw door rect at world coords
                  ctx.fillRect(
-                    door.position.x - door.size.x / 2 - camera.x,
-                    door.position.y - door.size.y / 2 - camera.y,
+                    door.position.x - door.size.x / 2, // Removed - camera.x
+                    door.position.y - door.size.y / 2, // Removed - camera.y
                     door.size.x,
                     door.size.y
                  );
+                 // Draw door border, scaling line width
                  ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-                 ctx.lineWidth = 2;
+                 ctx.lineWidth = 2 / camera.zoom; // Scale line width
                  ctx.strokeRect(
-                     door.position.x - door.size.x / 2 - camera.x,
-                     door.position.y - door.size.y / 2 - camera.y,
+                     door.position.x - door.size.x / 2, // Removed - camera.x
+                     door.position.y - door.size.y / 2, // Removed - camera.y
                      door.size.x,
                      door.size.y
                  );
@@ -658,6 +664,13 @@ export class Building {
             }
         }
 
-        return exteriorObstacles;
-    }
-}
+         return exteriorObstacles;
+     }
+
+     // Get the Y coordinate for depth sorting (bottom edge of the building)
+     getSortY() {
+         // Drawing is based on top-left position and size
+         // Subtract epsilon for sort stability against player
+         return this.position.y + this.size.y - 0.01;
+     }
+ }

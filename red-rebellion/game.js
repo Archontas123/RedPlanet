@@ -1,7 +1,9 @@
 import { Vector2, lineIntersectsRect, isLineOfSightClear } from './utils.js';
-import { Player, Projectile, Item, ItemDrop, Container, MedKit, Generator } from './entities.js';
+// Removed duplicate: import { Vector2 } from './math/Vector2.js';
+import { Player, Projectile, Item, ItemDrop, Container, MedKit, Generator, Tree } from './entities.js'; // Import Tree
 import { Settlement } from './settlement.js';
-import { Door } from './structures.js';
+import { PlayerSettlement } from './PlayerSettlement.js';
+import { Door, StorageDepot, Building } from './structures.js'; // Import Building
 import { WorldManager, CHUNK_SIZE, LOAD_RADIUS } from './world.js';
 
 class Game {
@@ -24,6 +26,10 @@ class Game {
         this.inventoryScreen = document.getElementById('inventory-screen');
         this.inventoryGrid = document.getElementById('inventory-grid');
         this.closeInventoryButton = document.getElementById('close-inventory-button');
+        this.depotGuiScreen = document.getElementById('depot-gui-screen'); // Added
+        this.depotPlayerInventoryGrid = document.getElementById('depot-player-inventory-grid'); // Added
+        this.depotStorageInventoryGrid = document.getElementById('depot-storage-inventory-grid'); // Added
+        this.closeDepotGuiButton = document.getElementById('close-depot-gui-button'); // Added
 
         this.gameActive = false;
         this.lastTime = 0;
@@ -32,18 +38,27 @@ class Game {
         this.projectiles = [];
         this.items = [];
         this.itemDrops = [];
+        this.allTrees = []; // Add list to track active trees
         this.plasmaScore = 0;
+        this.playerSettlement = null; // Add player settlement property
         this.inventoryOpen = false;
-        this.camera = { x: 0, y: 0 };
+        this.depotGuiOpen = false; // State for depot GUI
+        this.activeDepotGui = null; // Reference to the depot being interacted with
+        this.camera = { x: 0, y: 0, zoom: 1.5 }; // Added zoom property
         this.mousePos = { x: 0, y: 0 };
 
-        this.keys = { w: false, a: false, s: false, d: false, shift: false, e: false, space: false, f: false, v: false, p: false };
+        this.keys = { w: false, a: false, s: false, d: false, shift: false, e: false, space: false, f: false, v: false, p: false, c: false }; // Added 'c' key
 
         this.itemImagePaths = {
             rock: 'assets/items/rock.png',
             wood: 'assets/items/wood.png',
+            food: 'assets/items/food.png', // Add new resource types if needed
+            hide: 'assets/items/hide.png',
             heal: 'assets/items/heal.png',
-            plasma: 'assets/items/plasma.png'
+            plasma: 'assets/items/plasma.png',
+            axe: 'assets/items/axe.png', // Add tool images
+            pickaxe: 'assets/items/pickaxe.png',
+            knife: 'assets/items/knife.png'
         };
         this.groundTile = new Image();
         this.groundTile.src = 'assets/ground/ground_tile_standard.png';
@@ -73,6 +88,7 @@ class Game {
         this.startButton.addEventListener('click', () => this.startGame());
         this.retryButton.addEventListener('click', () => this.startGame());
         this.closeInventoryButton.addEventListener('click', () => this.toggleInventory());
+        this.closeDepotGuiButton.addEventListener('click', () => this.toggleDepotGui(null)); // Add listener for depot close button
 
         window.addEventListener('keydown', (e) => this.handleKeyDown(e));
         window.addEventListener('keyup', (e) => this.handleKeyUp(e));
@@ -85,11 +101,19 @@ class Game {
     handleKeyDown(e) {
         const key = e.key.toLowerCase();
         if (this.gameActive && this.player) {
-            if (key === 'v') {
+            if (key === 'escape') { // Add Escape key listener
+                if (this.depotGuiOpen) {
+                    this.toggleDepotGui(null); // Close depot GUI
+                    e.preventDefault();
+                } else if (this.inventoryOpen) {
+                    this.toggleInventory(); // Close inventory GUI
+                    e.preventDefault();
+                }
+            } else if (key === 'v' && !this.depotGuiOpen) { // Prevent opening inventory if depot is open
                 this.toggleInventory();
                 this.keys.v = true;
                 e.preventDefault();
-            } else if (!this.inventoryOpen) {
+            } else if (!this.inventoryOpen && !this.depotGuiOpen) { // Only handle game keys if no GUI is open
                 if (e.key === ' ') {
                     this.keys.space = true;
                 } else if (key === this.player.interactKey) {
@@ -97,13 +121,174 @@ class Game {
                     this.handleInteraction();
                 } else if (key === this.player.pickupKey) {
                     this.keys[key] = true;
-                    this.handlePickup();
+                    // Removed direct call: this.handlePickup();
+                } else if (key === 'c') { // Handle 'c' key down
+                    this.keys.c = true;
                 } else if (key in this.keys) {
                     this.keys[key] = true;
                 }
             }
         }
     }
+
+    // --- Depot GUI Methods ---
+
+    toggleDepotGui(depotInstance) {
+        if (this.depotGuiOpen && this.activeDepotGui === depotInstance) {
+            // Close the currently open GUI for this depot
+            this.depotGuiOpen = false;
+            this.activeDepotGui = null;
+            this.depotGuiScreen.classList.remove('active');
+            console.log("Closed Depot GUI");
+        } else if (depotInstance && this.playerSettlement) {
+            // Open the GUI for the specified depot
+            this.depotGuiOpen = true;
+            this.activeDepotGui = depotInstance; // Store reference if needed later
+            this.inventoryOpen = false; // Close regular inventory if open
+            this.inventoryScreen.classList.remove('active');
+            this.depotGuiScreen.classList.add('active');
+            this.updateDepotGuiDisplay();
+            console.log("Opened Depot GUI");
+        } else if (!depotInstance && this.depotGuiOpen) {
+            // Close the GUI (called by close button or key press)
+            this.depotGuiOpen = false;
+            this.activeDepotGui = null;
+            this.depotGuiScreen.classList.remove('active');
+            console.log("Closed Depot GUI");
+        }
+    }
+
+    updateDepotGuiDisplay() {
+        if (!this.depotGuiOpen || !this.player || !this.playerSettlement || !this.depotPlayerInventoryGrid || !this.depotStorageInventoryGrid) return;
+
+        // Clear previous content
+        this.depotPlayerInventoryGrid.innerHTML = '';
+        this.depotStorageInventoryGrid.innerHTML = '';
+
+        const resourceTypes = ['wood', 'rock', 'food', 'hide', 'plasma']; // Define displayable resources
+
+        // Populate Player Inventory side
+        for (const itemType of resourceTypes) {
+            const count = this.player.inventory[itemType] || 0;
+            if (count > 0) { // Only show items the player has
+                const slot = this.createDepotGuiSlot(itemType, count, true); // true indicates player side
+                this.depotPlayerInventoryGrid.appendChild(slot);
+            }
+        }
+         // Add empty slots if needed for layout, or just let it be sparse
+
+        // Populate Depot Storage side
+        for (const itemType of resourceTypes) {
+            const count = this.playerSettlement.resources[itemType] || 0;
+             if (count > 0) { // Only show items the depot has
+                const slot = this.createDepotGuiSlot(itemType, count, false); // false indicates depot side
+                this.depotStorageInventoryGrid.appendChild(slot);
+            }
+        }
+         // Add empty slots if needed for layout
+    }
+
+    createDepotGuiSlot(itemType, count, isPlayerSide) {
+        const slot = document.createElement('div');
+        slot.className = 'depot-slot';
+
+        const img = document.createElement('img');
+        img.src = this.itemImagePaths[itemType] || '';
+        img.alt = itemType;
+        img.onerror = () => { img.style.display = 'none'; };
+        slot.appendChild(img);
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'item-name';
+        nameSpan.textContent = itemType.charAt(0).toUpperCase() + itemType.slice(1);
+        slot.appendChild(nameSpan);
+
+        const countSpan = document.createElement('span');
+        countSpan.className = 'item-count';
+        countSpan.textContent = count;
+        slot.appendChild(countSpan);
+
+        // Add click listener for transfer with modifiers
+        slot.addEventListener('click', (event) => {
+            const sourceAmount = isPlayerSide ? (this.player.inventory[itemType] || 0) : (this.playerSettlement.resources[itemType] || 0);
+            let transferAmount = 0;
+
+            if (event.ctrlKey) {
+                // Ctrl + Click: Transfer all
+                transferAmount = sourceAmount;
+            } else if (event.shiftKey) {
+                // Shift + Click: Transfer 10
+                transferAmount = Math.min(10, sourceAmount);
+            } else {
+                // Simple Click: Transfer 1
+                transferAmount = Math.min(1, sourceAmount);
+            }
+
+            if (transferAmount <= 0) return; // Nothing to transfer
+
+            if (isPlayerSide) {
+                this.transferToDepot(itemType, transferAmount);
+            } else {
+                this.transferToPlayer(itemType, transferAmount);
+            }
+        });
+
+        return slot;
+    }
+
+    transferToDepot(resourceType, amount) {
+        if (!this.depotGuiOpen || !this.player || !this.playerSettlement) return;
+
+        const playerAmount = this.player.inventory[resourceType] || 0;
+        const depotCurrentAmount = this.playerSettlement.resources[resourceType] || 0;
+        const depotSpaceAvailable = this.playerSettlement.maxStackSize - depotCurrentAmount;
+
+        // Determine actual amount based on request, player stock, and depot space
+        const amountToTry = Math.min(amount, playerAmount); // Can't transfer more than player has
+        const transferAmount = Math.min(amountToTry, depotSpaceAvailable); // Can't transfer more than depot can hold
+
+        if (transferAmount > 0) {
+            this.player.inventory[resourceType] -= transferAmount;
+            // addResource already handles the stack limit check internally, but we log based on the calculated transferAmount
+            this.playerSettlement.addResource(resourceType, transferAmount); // Add the calculated valid amount
+            console.log(`Transferred ${transferAmount} ${resourceType} to depot.`);
+            this.updateDepotGuiDisplay(); // Refresh GUI
+            this.updateInventoryDisplay(); // Refresh main inventory display if it was open
+            if (transferAmount < amountToTry) {
+                 console.log(`Depot storage for ${resourceType} full. Could not transfer ${amountToTry - transferAmount} ${resourceType}.`);
+            }
+        } else {
+            console.log(`Not enough ${resourceType} in player inventory to transfer.`);
+        }
+    }
+
+    transferToPlayer(resourceType, amount) {
+        if (!this.depotGuiOpen || !this.player || !this.playerSettlement) return;
+
+        const depotAmount = this.playerSettlement.resources[resourceType] || 0;
+        const currentAmountPlayer = this.player.inventory[resourceType] || 0;
+        const spaceAvailablePlayer = this.player.maxStackSize - currentAmountPlayer;
+
+        // Determine the actual amount to transfer based on request, depot stock, and player space
+        const amountToTry = Math.min(amount, depotAmount); // Can't take more than depot has
+        const transferAmount = Math.min(amountToTry, spaceAvailablePlayer); // Can't take more than player can hold
+
+        if (transferAmount > 0) {
+            this.playerSettlement.removeResource(resourceType, transferAmount);
+            this.player.inventory[resourceType] = currentAmountPlayer + transferAmount;
+            console.log(`Transferred ${transferAmount} ${resourceType} to player.`);
+            this.updateDepotGuiDisplay(); // Refresh GUI
+            this.updateInventoryDisplay(); // Refresh main inventory display if it was open
+            if (transferAmount < amountToTry) {
+                console.log(`Player inventory for ${resourceType} full. Could not transfer ${amountToTry - transferAmount} ${resourceType}.`);
+            }
+        } else {
+            console.log(`Not enough ${resourceType} in depot storage to transfer.`);
+        }
+    }
+
+    // --- End Depot GUI Methods ---
+
 
     handleKeyUp(e) {
         const key = e.key.toLowerCase();
@@ -117,6 +302,8 @@ class Game {
                      this.keys[key] = false;
                 } else if (key === this.player.pickupKey) {
                      this.keys[key] = false;
+                } else if (key === 'c') { // Handle 'c' key up
+                    this.keys.c = false;
                 } else if (key in this.keys) {
                     this.keys[key] = false;
                 }
@@ -126,16 +313,68 @@ class Game {
 
     handleMouseMove(e) {
         const rect = this.canvas.getBoundingClientRect();
-        this.mousePos.x = e.clientX - rect.left;
-        this.mousePos.y = e.clientY - rect.top;
+        // Adjust mouse coordinates for camera position and zoom
+        const screenX = e.clientX - rect.left;
+        const screenY = e.clientY - rect.top;
+        this.mousePos.x = screenX / this.camera.zoom + this.camera.x;
+        this.mousePos.y = screenY / this.camera.zoom + this.camera.y;
     }
 
     handleMouseDown(e) {
-        if (e.button === 0 && !this.inventoryOpen) {
-            if (this.gameActive && this.player && this.worldManager) {
-                 this.player.attack(this.mousePos, this.camera, this.projectiles, this.worldManager.getActiveSettlements());
+        // Prevent clicks if inventory or depot GUI is open
+        if (this.inventoryOpen || this.depotGuiOpen) return;
+
+        if (e.button === 0 && this.gameActive && this.player && this.worldManager) {
+            const equippedWeapon = this.player.weapons[this.player.currentWeaponIndex];
+            const toolTypes = ['Axe', 'Pickaxe', 'Knife']; // Define which weapons are tools
+
+            if (toolTypes.includes(equippedWeapon)) {
+                // Tool is equipped, try to interact with entity near mouse
+                // mousePos is now already in world coordinates due to handleMouseMove changes
+                const clickPos = new Vector2(this.mousePos.x, this.mousePos.y);
+                const interactionRadiusSq = 50 * 50; // How close the click needs to be
+
+                let targetEntity = null;
+
+                // Check trees first (add other resource types later)
+                for (const tree of this.allTrees) {
+                    if (tree.health > 0 && clickPos.distanceSq(tree.position) < interactionRadiusSq + tree.interactionRadius * tree.interactionRadius) {
+                         // Check if the tool matches the requirement
+                         if (tree.requiredTool && equippedWeapon.toLowerCase() === tree.requiredTool.toLowerCase()) {
+                            targetEntity = tree;
+                            break;
+                         }
+                    }
+                }
+
+                // TODO: Add checks for Rocks (Pickaxe), Animals (Knife after kill) here
+
+                if (targetEntity) {
+                    console.log(`Using ${equippedWeapon} on ${targetEntity.type}`);
+                    const interactionResult = targetEntity.interact(this.player, this);
+                    if (interactionResult && interactionResult.felled) {
+                        // Remove felled tree (already handled in handleInteraction, but maybe needed here too?)
+                        // For now, interact handles the drop, health reduction.
+                        // We might need cooldowns for tool swings later.
+                    }
+                } else {
+                    // Optional: Play a 'miss' sound or animation if clicking with a tool but not hitting anything valid
+                    console.log(`Clicked with ${equippedWeapon}, no valid target.`);
+                     // If it's the knife, still perform the attack function for combat
+                     if (equippedWeapon === 'Knife') {
+                         this.player.attack(this.mousePos, this.camera, this.projectiles, this.worldManager.getActiveSettlements());
+                     }
+                }
+
+            } else {
+                // Regular weapon attack - needs screen coordinates relative to canvas center for direction
+                const screenX = (this.mousePos.x - this.camera.x) * this.camera.zoom;
+                const screenY = (this.mousePos.y - this.camera.y) * this.camera.zoom;
+                const attackScreenPos = { x: screenX, y: screenY }; // Use screen coords for attack direction calculation
+                this.player.attack(attackScreenPos, this.camera, this.projectiles, this.worldManager.getActiveSettlements());
             }
         }
+        // Note: Right-click (e.button === 2) is currently prevented by contextmenu listener
     }
 
     handleResize() {
@@ -162,9 +401,14 @@ class Game {
             this.playerImgIdle2
         );
 
+        // Create the player settlement near the start position
+        const settlementOffset = new Vector2(0, 100); // Place it slightly below the player start
+        this.playerSettlement = new PlayerSettlement(startPos.add(settlementOffset));
+
         this.projectiles = [];
         this.items = [];
         this.itemDrops = [];
+        this.allTrees = []; // Reset trees on game init
         this.plasmaScore = 0;
         this.updateScoreDisplay();
 
@@ -197,11 +441,44 @@ class Game {
         this.lastTime = timestamp;
 
         const activeSettlements = this.worldManager.getActiveSettlements();
+        const activeTrees = this.worldManager.getActiveTrees();
+        const activeDecorations = this.worldManager.getActiveDecorations(); // Get active decorations
+        this.allTrees = activeTrees; // Update the game's list (simple approach for now)
 
-        if (!this.inventoryOpen) {
+        // Only update game state if no GUI is open
+        if (!this.inventoryOpen && !this.depotGuiOpen) {
             this.worldManager.updateActiveChunks(this.player.position.x, this.player.position.y);
 
             this.player.update(deltaTime, this.keys, this.worldManager, this.healthFill, this.weaponDisplay, this.projectiles, this.itemDrops, this);
+
+            // Handle chopping action
+            if (this.keys.c && this.player.chopTarget) {
+                const equippedWeapon = this.player.weapons[this.player.currentWeaponIndex];
+                if (equippedWeapon === 'Axe') {
+                    // Apply damage over time while holding 'c'
+                    // Need a damage rate and potentially a cooldown/timer mechanism here
+                    // For simplicity now, let's call takeDamage directly, but this will be very fast.
+                    // A better approach would involve a timer or applying damage proportional to deltaTime.
+                    // Let's add a simple cooldown for chopping.
+                    if (!this.chopCooldown || this.chopCooldown <= 0) {
+                        const chopDamage = 25; // Example damage per chop action
+                        this.player.chopTarget.takeDamage(chopDamage, this.player, 'axe'); // Pass player as source
+                        this.chopCooldown = 0.5; // Cooldown in seconds between chops
+                        console.log(`Chopping tree with Axe. Health: ${this.player.chopTarget.health}`);
+                        // Check if tree was felled by this chop
+                        if (this.player.chopTarget.isFelled) {
+                            this.handleTreeFelled(this.player.chopTarget);
+                            this.player.chopTarget = null; // Clear target after felling
+                        }
+                    }
+                } else {
+                    // Optional: Show a message "Axe required" or similar
+                }
+            }
+            if (this.chopCooldown > 0) {
+                this.chopCooldown -= deltaTime;
+            }
+
 
             activeSettlements.forEach(settlement => settlement.update(deltaTime, this.player, isLineOfSightClear, this.projectiles, this));
 
@@ -223,119 +500,255 @@ class Game {
                  }
              }
 
+            this.playerSettlement.update(deltaTime); // Update player settlement
             this.updateCamera();
+
+            // --- Continuous Pickup Logic (Moved from handlePickup) ---
+            if (this.keys[this.player.pickupKey] && this.player.pickupTarget) {
+                const targetDrop = this.player.pickupTarget;
+                const distanceSq = this.player.position.distanceSq(targetDrop.position);
+                const sameFloor = (!this.player.currentBuilding && targetDrop.floorIndex === 0) ||
+                                  (this.player.currentBuilding && targetDrop.floorIndex === this.player.currentFloor);
+
+                if (distanceSq < targetDrop.pickupRadius * targetDrop.pickupRadius && sameFloor) {
+                    const itemType = targetDrop.itemType;
+                    if (itemType in this.player.inventory) {
+                        const currentAmount = this.player.inventory[itemType] || 0;
+                        const spaceAvailable = this.player.maxStackSize - currentAmount;
+                        const amountToPickup = Math.min(targetDrop.quantity, spaceAvailable);
+
+                        if (amountToPickup > 0) {
+                            this.player.inventory[itemType] = currentAmount + amountToPickup;
+                            // console.log(`Picked up ${amountToPickup} ${itemType}. New total: ${this.player.inventory[itemType]}`); // Optional: Reduce console spam
+
+                            targetDrop.quantity -= amountToPickup;
+                            if (targetDrop.quantity <= 0) {
+                                const index = this.itemDrops.indexOf(targetDrop);
+                                if (index > -1) {
+                                    this.itemDrops.splice(index, 1);
+                                }
+                                this.player.pickupTarget = null; // Clear target if drop is gone
+                            }
+                            this.updateInventoryDisplay(); // Update inventory display if open
+                        } else {
+                            // console.log(`Inventory full for ${itemType}. Cannot pick up.`); // Optional: Reduce console spam
+                        }
+                    } else {
+                        console.warn(`Attempted to pick up unknown item type: ${itemType}`);
+                        const index = this.itemDrops.indexOf(targetDrop);
+                        if (index > -1) {
+                            this.itemDrops.splice(index, 1);
+                        }
+                        this.player.pickupTarget = null;
+                    }
+                }
+            }
+            // --- End Continuous Pickup Logic ---
+
+        } else if (this.depotGuiOpen) {
+            // Optional: Could add subtle background updates or animations even when GUI is open
         }
 
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        this.drawBackground(this.ctx, this.camera);
+        this.drawBackground(this.ctx, this.camera); // Draw background first (unscaled)
 
-        const isPlayerInside = !!this.player.currentBuilding;
+        // --- Apply Camera Transformations ---
+        this.ctx.save();
+        this.ctx.scale(this.camera.zoom, this.camera.zoom);
+        this.ctx.translate(-this.camera.x, -this.camera.y);
 
-        activeSettlements.forEach(settlement => {
-            settlement.buildings.forEach(building => {
-                const drawFloor = isPlayerInside && this.player.currentBuilding === building ? this.player.currentFloor : 0;
-                const drawInterior = isPlayerInside && this.player.currentBuilding === building;
-                building.draw(this.ctx, this.camera, drawFloor, drawInterior);
-            });
+         const isPlayerInside = !!this.player.currentBuilding;
 
+         // Remove premature building drawing here - they are added to drawableEntities later for proper sorting.
+
+         // --- Collect and Sort Drawable Entities ---
+         let drawableEntities = [];
+
+         // Add enemy settlement buildings
+         activeSettlements.forEach(settlement => {
+             drawableEntities = drawableEntities.concat(settlement.buildings);
+         });
+
+         // Add humans (only if visible on current floor/outside)
+         activeSettlements.forEach(settlement => {
             settlement.humans.forEach(human => {
-                const sameFloor = isPlayerInside && this.player.currentBuilding === human.building && this.player.currentFloor === human.currentFloor;
+                const sameFloor = isPlayerInside && human.building === this.player.currentBuilding && human.currentFloor === this.player.currentFloor;
                 const bothOutside = !isPlayerInside && !human.building;
                 if (sameFloor || bothOutside) {
-                    human.draw(this.ctx, this.camera);
+                    drawableEntities.push(human);
                 }
             });
         });
 
-        this.items.forEach(item => {
-            if (!isPlayerInside) {
-                 item.draw(this.ctx, this.camera);
-            }
-        });
+        // Add non-felled trees (only if player is outside)
+        if (!isPlayerInside) {
+             this.allTrees.forEach(tree => {
+                 if (!tree.isFelled) {
+                     drawableEntities.push(tree);
+                 }
+             });
+        }
 
+        // Add items (only if player is outside)
+         this.items.forEach(item => {
+             if (!isPlayerInside) {
+                  drawableEntities.push(item);
+             }
+         });
+
+        // Add item drops (only if visible on current floor/outside)
         this.itemDrops.forEach(drop => {
             const sameFloor = (!isPlayerInside && drop.floorIndex === 0) ||
                               (isPlayerInside && drop.floorIndex === this.player.currentFloor);
             if (sameFloor) {
-                drop.draw(this.ctx, this.camera);
+                drawableEntities.push(drop);
             }
         });
 
-        this.projectiles.forEach(p => p.draw(this.ctx, this.camera));
+        // Add player settlement structures
+        if (this.playerSettlement) {
+             drawableEntities = drawableEntities.concat(this.playerSettlement.structures);
+        }
 
-        this.player.draw(this.ctx, this.camera);
+        // Add decorations (only if player is outside)
+        if (!isPlayerInside) {
+            drawableEntities = drawableEntities.concat(activeDecorations);
+        }
 
-        this.updateHUD();
-        this.drawMinimap();
+        // Add projectiles
+        drawableEntities = drawableEntities.concat(this.projectiles);
 
-        requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
-    }
+        // Add the player
+        if (this.player) {
+            drawableEntities.push(this.player);
+         }
 
-    updateCamera() {
-        this.camera.x = this.player.position.x - this.canvas.width / 2;
-        this.camera.y = this.player.position.y - this.canvas.height / 2;
-    }
+         // Sort by the 'bottom' Y coordinate using getSortY(), with X as a tie-breaker for stability
+         drawableEntities.sort((a, b) => {
+             const yA = typeof a.getSortY === 'function' ? a.getSortY() : a.position.y;
+             const yB = typeof b.getSortY === 'function' ? b.getSortY() : b.position.y;
+             const yDiff = yA - yB;
+             // Increase tolerance slightly for tie-breaking
+             if (Math.abs(yDiff) < 0.1) { // If Y is very close, use X to break the tie
+                 return a.position.x - b.position.x;
+             }
+             return yDiff;
+         });
 
-    drawBackground(ctx, camera) {
-        if (this.groundPattern) {
-            ctx.save();
-            ctx.fillStyle = this.groundPattern;
-            ctx.translate(-camera.x % this.groundTile.width, -camera.y % this.groundTile.height);
-            ctx.fillRect(
-                (camera.x % this.groundTile.width) - this.groundTile.width,
-                (camera.y % this.groundTile.height) - this.groundTile.height,
-                this.canvas.width + this.groundTile.width * 2,
-                this.canvas.height + this.groundTile.height * 2
-            );
-            ctx.restore();
-        } else {
+         // --- Draw Sorted Entities ---
+         drawableEntities.forEach(entity => {
+             // Buildings need special draw parameters
+             if (entity instanceof Building) {
+                 const drawFloor = isPlayerInside && this.player.currentBuilding === entity ? this.player.currentFloor : 0;
+                 const drawInterior = isPlayerInside && this.player.currentBuilding === entity;
+                 entity.draw(this.ctx, this.camera, drawFloor, drawInterior);
+             } else {
+                 // Ensure other entities have a standard draw method or handle appropriately
+                 if (typeof entity.draw === 'function') {
+                     entity.draw(this.ctx, this.camera);
+                 }
+             }
+         });
+
+        // --- HUD and Minimap ---
+         this.updateHUD();
+         this.drawMinimap();
+
+         // --- Restore Context ---
+         this.ctx.restore(); // Restore context before drawing HUD/Minimap
+
+         requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
+     }
+
+     updateCamera() {
+         // Center camera based on zoom level
+         this.camera.x = this.player.position.x - (this.canvas.width / this.camera.zoom / 2);
+         this.camera.y = this.player.position.y - (this.canvas.height / this.camera.zoom / 2);
+     }
+
+     drawBackground(ctx, camera) {
+         // Background should fill the screen regardless of zoom, so draw before scaling
+         if (this.groundPattern) {
+             ctx.save();
+             ctx.fillStyle = this.groundPattern;
+             // Translate based on camera position but don't scale the pattern itself
+             const tileWidth = this.groundTile.width;
+             const tileHeight = this.groundTile.height;
+             const offsetX = -camera.x % tileWidth;
+             const offsetY = -camera.y % tileHeight;
+             ctx.translate(offsetX, offsetY);
+             // Fill the entire canvas area, extending slightly to cover edges during movement
+             ctx.fillRect(-offsetX - tileWidth, -offsetY - tileHeight, this.canvas.width + 2 * tileWidth, this.canvas.height + 2 * tileHeight);
+             ctx.restore();
+         } else {
             ctx.fillStyle = '#4d1a00';
-            ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        }
+             ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+         }
 
-        ctx.fillStyle = 'rgba(255, 255, 200, 0.6)';
-        const starsPerChunk = 10;
-        const { chunkX: centerChunkX, chunkY: centerChunkY } = this.worldManager.getChunkCoords(camera.x + this.canvas.width / 2, camera.y + this.canvas.height / 2);
-        const renderRadius = 2;
+         // Draw stars - these should appear fixed relative to the world, so draw them *after* scaling/translation?
+         // No, background elements should be drawn before the main scaling. Let's adjust the star drawing logic.
+         ctx.fillStyle = 'rgba(255, 255, 200, 0.6)';
+         const starsPerChunk = 10;
+         // Calculate the visible world area based on camera and zoom
+         const viewWidthWorld = this.canvas.width / camera.zoom;
+         const viewHeightWorld = this.canvas.height / camera.zoom;
+         const viewLeftWorld = camera.x;
+         const viewTopWorld = camera.y;
+         const viewRightWorld = viewLeftWorld + viewWidthWorld;
+         const viewBottomWorld = viewTopWorld + viewHeightWorld;
 
-        for (let dx = -renderRadius; dx <= renderRadius; dx++) {
-            for (let dy = -renderRadius; dy <= renderRadius; dy++) {
-                const chunkX = centerChunkX + dx;
-                const chunkY = centerChunkY + dy;
-                const chunkWorldX = chunkX * CHUNK_SIZE;
-                const chunkWorldY = chunkY * CHUNK_SIZE;
+         // Determine the range of chunks to check based on the visible world area
+         const startChunkX = Math.floor(viewLeftWorld / CHUNK_SIZE) - 1; // Add buffer
+         const endChunkX = Math.floor(viewRightWorld / CHUNK_SIZE) + 1;
+         const startChunkY = Math.floor(viewTopWorld / CHUNK_SIZE) - 1;
+         const endChunkY = Math.floor(viewBottomWorld / CHUNK_SIZE) + 1;
 
-                const chunkSeed = this.worldManager.simpleHash(chunkX, chunkY, this.worldManager.worldSeed * 3);
-                for (let i = 0; i < starsPerChunk; i++) {
-                    const starSeed = chunkSeed + i * 79;
-                    const starRelX = this.worldManager.seededRandom(starSeed * 17) * CHUNK_SIZE;
-                    const starRelY = this.worldManager.seededRandom(starSeed * 29) * CHUNK_SIZE;
-                    const starWorldX = chunkWorldX + starRelX;
-                    const starWorldY = chunkWorldY + starRelY;
 
-                    const screenX = starWorldX - camera.x;
-                    const screenY = starWorldY - camera.y;
+         for (let chunkX = startChunkX; chunkX <= endChunkX; chunkX++) {
+             for (let chunkY = startChunkY; chunkY <= endChunkY; chunkY++) {
+                 const chunkWorldX = chunkX * CHUNK_SIZE;
+                 const chunkWorldY = chunkY * CHUNK_SIZE;
+                 const chunkSeed = this.worldManager.simpleHash(chunkX, chunkY, this.worldManager.worldSeed * 3);
 
-                    if (screenX > -10 && screenX < this.canvas.width + 10 && screenY > -10 && screenY < this.canvas.height + 10) {
-                         ctx.fillRect(screenX, screenY, 2, 2);
-                    }
-                }
-            }
-        }
-    }
+                 for (let i = 0; i < starsPerChunk; i++) {
+                     const starSeed = chunkSeed + i * 79;
+                     const starRelX = this.worldManager.seededRandom(starSeed * 17) * CHUNK_SIZE;
+                     const starRelY = this.worldManager.seededRandom(starSeed * 29) * CHUNK_SIZE;
+                     const starWorldX = chunkWorldX + starRelX;
+                     const starWorldY = chunkWorldY + starRelY;
+
+                     // Convert world coordinates to screen coordinates (without zoom applied yet)
+                     const screenX = starWorldX - camera.x;
+                     const screenY = starWorldY - camera.y;
+
+                     // Apply zoom manually for star positions since this is drawn before the main scale transform
+                     const zoomedScreenX = screenX * camera.zoom;
+                     const zoomedScreenY = screenY * camera.zoom;
+                     const starSize = 2 * camera.zoom; // Scale star size too
+
+                     // Check if the zoomed star position is within the canvas bounds
+                     if (zoomedScreenX > -starSize && zoomedScreenX < this.canvas.width + starSize && zoomedScreenY > -starSize && zoomedScreenY < this.canvas.height + starSize) {
+                          ctx.fillRect(zoomedScreenX, zoomedScreenY, starSize, starSize);
+                     }
+                 }
+             }
+         }
+     } // End of corrected drawBackground
 
     drawMinimap() {
         if (!this.minimapCtx || !this.player || !this.worldManager) return;
 
         const mapWidth = this.minimapCanvas.width;
         const mapHeight = this.minimapCanvas.height;
-        const minimapWorldViewSize = CHUNK_SIZE * (LOAD_RADIUS * 2 + 1);
-        const scale = mapWidth / minimapWorldViewSize;
+        // Adjust minimap view size based on zoom? Or keep it fixed? Let's keep it fixed for now.
+        // const minimapWorldViewSize = CHUNK_SIZE * (LOAD_RADIUS * 2 + 1) / this.camera.zoom; // Example if we wanted zoom effect
+        const minimapWorldViewSize = CHUNK_SIZE * (LOAD_RADIUS * 2 + 1); // Keep fixed view size - Removed duplicate declaration
+        const scale = mapWidth / minimapWorldViewSize; // Removed duplicate declaration
         const viewWorldX = this.player.position.x - (mapWidth / scale / 2);
         const viewWorldY = this.player.position.y - (mapHeight / scale / 2);
 
-        this.minimapCtx.fillStyle = 'rgba(10, 10, 10, 0.8)';
-        this.minimapCtx.fillRect(0, 0, mapWidth, mapHeight);
+         this.minimapCtx.fillStyle = 'rgba(10, 10, 10, 0.8)';
+         this.minimapCtx.fillRect(0, 0, mapWidth, mapHeight);
 
         const activeSettlements = this.worldManager.getActiveSettlements();
 
@@ -433,79 +846,23 @@ class Game {
         this.showScreen(this.gameOverScreen);
     }
 
-    handleInteraction() {
-        if (!this.gameActive || !this.player || this.inventoryOpen) return;
-
-        const target = this.player.interactTarget;
-
-        if (target) {
-            if (target.isDoor) {
-                target.interact(this.player);
-                console.log("Toggled door.");
-            } else if (target.isStairs) {
-                const interactionResult = target.interact(this.player);
-                if (interactionResult) {
-                    console.log(`Using stairs to floor ${interactionResult.targetFloor}`);
-                    this.player.currentFloor = interactionResult.targetFloor;
-                    this.player.position = interactionResult.targetPosition.clone();
-                    this.updateCamera();
-                }
-            } else if (target.isContainer || target.isMedKit) {
-                const drops = target.interact(this.player);
-                if (drops && Array.isArray(drops) && drops.length > 0) {
-                    const interactableType = target.isContainer ? 'Container' : 'MedKit';
-                    console.log(`Interacted with ${interactableType}. Spawning drops...`);
-                    drops.forEach(dropInfo => {
-                        const spawnOffset = Vector2.fromAngle(Math.random() * Math.PI * 2, Math.random() * 15 + 10);
-                        const spawnPos = target.position.add(spawnOffset);
-                        const newDrop = new ItemDrop(spawnPos, dropInfo.type, dropInfo.quantity, this.player.currentFloor);
-                        this.itemDrops.push(newDrop);
-                        console.log(` --> Spawned drop: ${dropInfo.quantity} ${dropInfo.type} on floor ${this.player.currentFloor} at ${spawnPos.x.toFixed(1)}, ${spawnPos.y.toFixed(1)}`);
-                    });
-                } else {
-                     console.log(`Interacted with already opened ${target.isContainer ? 'Container' : 'MedKit'}.`);
-                }
-            } else if (target.isGenerator) {
-                const interactionResult = target.interact(this.player);
-                if (interactionResult) {
-                    console.log("Interacted with generator, plasma added directly.");
-                } else {
-                    console.log("Interacted with already used Generator.");
-                }
-            } else {
-                console.warn("Attempted to interact with unknown target type:", target);
-            }
+    // Helper function to handle resource drops when a tree is felled
+    handleTreeFelled(tree) {
+        console.log("Tree felled, dropping resources...");
+        const drops = tree.getResourceDrops(); // Assuming Tree has this method
+        if (drops && Array.isArray(drops) && drops.length > 0) {
+            drops.forEach(dropInfo => {
+                const spawnOffset = Vector2.fromAngle(Math.random() * Math.PI * 2, Math.random() * 15 + 10);
+                const spawnPos = tree.position.add(spawnOffset);
+                // Trees are always on floor 0
+                const newDrop = new ItemDrop(spawnPos, dropInfo.type, dropInfo.quantity, 0);
+                this.itemDrops.push(newDrop);
+                // Removed misplaced else if/else blocks
+            }); // End drops.forEach
         }
     }
 
-    handlePickup() {
-        if (!this.gameActive || !this.player || this.inventoryOpen || !this.player.pickupTarget) return;
-
-        const targetDrop = this.player.pickupTarget;
-        const distanceSq = this.player.position.distanceSq(targetDrop.position);
-        const sameFloor = (!this.player.currentBuilding && targetDrop.floorIndex === 0) ||
-                          (this.player.currentBuilding && targetDrop.floorIndex === this.player.currentFloor);
-
-        if (distanceSq < targetDrop.pickupRadius * targetDrop.pickupRadius && sameFloor) {
-            if (targetDrop.itemType in this.player.inventory) {
-                this.player.inventory[targetDrop.itemType] += targetDrop.quantity;
-                console.log(`Picked up ${targetDrop.quantity} ${targetDrop.itemType}. New total: ${this.player.inventory[targetDrop.itemType]}`);
-
-                const index = this.itemDrops.indexOf(targetDrop);
-                if (index > -1) {
-                    this.itemDrops.splice(index, 1);
-                }
-                this.player.pickupTarget = null;
-            } else {
-                console.warn(`Attempted to pick up unknown item type: ${targetDrop.itemType}`);
-                const index = this.itemDrops.indexOf(targetDrop);
-                if (index > -1) {
-                    this.itemDrops.splice(index, 1);
-                }
-                this.player.pickupTarget = null;
-            }
-        }
-    }
+    // Removed handlePickup() function as logic is now in gameLoop
 }
 
 document.addEventListener('DOMContentLoaded', () => {

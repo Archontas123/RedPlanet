@@ -35,20 +35,22 @@ export class Door {
     }
 
     draw(ctx, camera) {
+        // Draw door base at world position
         ctx.fillStyle = this.color;
         ctx.fillRect(
-            this.position.x - this.size.x / 2 - camera.x,
-            this.position.y - this.size.y / 2 - camera.y,
+            this.position.x - this.size.x / 2, // Removed - camera.x
+            this.position.y - this.size.y / 2, // Removed - camera.y
             this.size.x,
             this.size.y
         );
 
+        // Draw knob if closed, scaling size inversely with zoom
         if (!this.isOpen) {
             ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-            const knobSize = Math.min(this.size.x, this.size.y) * 0.2;
+            const knobSize = (Math.min(this.size.x, this.size.y) * 0.2) / camera.zoom; // Scale knob size
             ctx.fillRect(
-                this.position.x - knobSize / 2 - camera.x,
-                this.position.y - knobSize / 2 - camera.y,
+                this.position.x - knobSize / 2, // Removed - camera.x
+                this.position.y - knobSize / 2, // Removed - camera.y
                 knobSize,
                 knobSize
             );

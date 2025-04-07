@@ -16,8 +16,9 @@ export class Player extends Entity {
         this.sneakSpeed = 100;
         this.speed = this.baseSpeed;
         this.isSneaking = false;
-        this.weapons = ['Knife', 'Gun', 'Shotgun'];
-        this.currentWeaponIndex = 0;
+        // Add tools to the weapon cycle
+        this.weapons = ['Knife', 'Axe', 'Pickaxe', 'Gun', 'Shotgun'];
+        this.currentWeaponIndex = 0; // Start with Knife (or maybe Axe?)
         this.attackCooldown = 0;
         this.knifeRange = 90;
         this.knifeDamage = 1000;
@@ -45,8 +46,21 @@ export class Player extends Entity {
         this.pickupKey = 'p';
         this.interactTarget = null;
         this.pickupTarget = null;
+        this.chopTarget = null; // Added for chopping trees
         this.currentBuilding = null;
-        this.inventory = { rock: 0, wood: 0, heal: 0, plasma: 0 };
+        this.inventory = {
+            wood: 0,
+            rock: 0,
+            food: 0,
+            hide: 0,
+            heal: 0,
+            plasma: 0
+            // Tools are now weapons, not inventory items
+            // axe: 1,
+            // pickaxe: 1,
+            // knife: 1
+        };
+        this.maxStackSize = 99; // Add max stack size for player inventory
     }
 
     update(deltaTime, keys, worldManager, healthFill, weaponDisplay, projectiles, itemDrops, game) {
@@ -89,6 +103,10 @@ export class Player extends Entity {
                      }
                  });
              });
+
+             // Add active, non-felled trees to obstacles when outside
+             const activeTrees = worldManager.getActiveTrees();
+             currentObstacles = currentObstacles.concat(activeTrees.filter(tree => !tree.isFelled));
          }
 
 
@@ -209,10 +227,40 @@ export class Player extends Entity {
                       }
                   });
               });
-          }
-          this.interactTarget = closestInteractable;
 
-          this.pickupTarget = null;
+              // Check for nearby interactables when outside (Trees, Depot)
+              const depot = game.playerSettlement?.getStorageDepot(); // Get depot from game's settlement
+              if (depot && depot.isInteractable) {
+                  const distSq = this.position.distanceSq(depot.position);
+                  if (distSq < minDistanceSq) {
+                      minDistanceSq = distSq;
+                      closestInteractable = depot;
+                  }
+              }
+            // Removed Tree check for 'F' key interaction target
+
+            // Check for nearby choppable trees when outside
+            this.chopTarget = null;
+            if (!this.currentBuilding) {
+                let closestTree = null;
+                let minTreeDistSq = 60 * 60; // Chopping range
+                const activeTrees = worldManager.getActiveTrees();
+                activeTrees.forEach(tree => {
+                    if (!tree.isFelled) {
+                        const distSq = this.position.distanceSq(tree.position);
+                        if (distSq < minTreeDistSq) {
+                            minTreeDistSq = distSq;
+                            closestTree = tree;
+                        }
+                    }
+                });
+                this.chopTarget = closestTree;
+            }
+        }
+        this.interactTarget = closestInteractable;
+
+
+        this.pickupTarget = null;
           let closestItemDrop = null;
           let minItemDistanceSq = 50 * 50;
 
@@ -262,6 +310,13 @@ export class Player extends Entity {
          weaponDisplay.textContent = `Weapon: ${this.weapons[this.currentWeaponIndex]}`;
      }
 
+     // Get the Y coordinate for depth sorting (bottom of the visual sprite)
+     getSortY() {
+         // Drawing is centered vertically, use visual size to match drawn position
+         // Removed bias, relying on calculated bottom edge and stable sort tie-breaker
+         return this.position.y + this.visualSize.y / 2;
+     }
+
      getDirectionVector(mousePos, camera) {
          const targetWorldX = mousePos.x + camera.x;
          const targetWorldY = mousePos.y + camera.y;
@@ -281,40 +336,42 @@ export class Player extends Entity {
               const drawHeight = this.visualSize.y;
               ctx.drawImage(
                   currentImage,
-                  this.position.x - drawWidth / 2 - camera.x,
-                  this.position.y - drawHeight / 2 - camera.y,
+                  this.position.x - drawWidth / 2, // Removed - camera.x
+                  this.position.y - drawHeight / 2, // Removed - camera.y
                   drawWidth,
                   drawHeight
               );
           } else {
               ctx.fillStyle = this.color;
               ctx.fillRect(
-                  this.position.x - this.size.x / 2 - camera.x,
-                  this.position.y - this.size.y / 2 - camera.y,
+                  this.position.x - this.size.x / 2, // Removed - camera.x
+                  this.position.y - this.size.y / 2, // Removed - camera.y
                   this.size.x,
                   this.size.y
               );
           }
 
-          ctx.strokeStyle = 'red';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(
-              this.position.x - this.size.x / 2 - camera.x,
-              this.position.y - this.size.y / 2 - camera.y,
-              this.size.x,
-              this.size.y
-          );
+          // Draw collision box (optional debug)
+          // ctx.strokeStyle = 'red';
+          // ctx.lineWidth = 1 / camera.zoom; // Adjust line width for zoom
+          // ctx.strokeRect(
+          //     this.position.x - this.size.x / 2, // Removed - camera.x
+          //     this.position.y - this.size.y / 2, // Removed - camera.y
+          //     this.size.x,
+          //     this.size.y
+          // );
 
           ctx.restore();
 
           if (this.health < this.maxHealth && this.health > 0) {
-              const barWidth = this.visualSize.x;
-              const barHeight = 5;
-              const barX = this.position.x - barWidth / 2 - camera.x;
-              const barY = this.position.y - this.visualSize.y / 2 - barHeight - 5 - camera.y;
+              const barWidth = this.visualSize.x; // Keep bar width relative to visual size
+              const barHeight = 5 / camera.zoom; // Scale UI elements inversely with zoom
+              const barX = this.position.x - barWidth / 2; // Removed - camera.x
+              const barY = this.position.y - this.visualSize.y / 2 - barHeight - (5 / camera.zoom); // Removed - camera.y, adjust offset based on zoom
 
+              // Draw health bar relative to player, scaling inversely with zoom
               ctx.fillStyle = 'rgba(0,0,0,0.7)';
-              ctx.fillRect(barX, barY, barWidth, barHeight);
+              ctx.fillRect(barX, barY, barWidth, barHeight); // Use world coords for position
               ctx.fillStyle = '#00ff00';
               ctx.fillRect(barX, barY, (barWidth * this.health) / this.maxHealth, barHeight);
           }
@@ -325,42 +382,66 @@ export class Player extends Entity {
             const endAngle = startAngle + swingAngle;
 
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-            ctx.lineWidth = 3;
+            ctx.lineWidth = 3 / camera.zoom; // Scale line width
             ctx.beginPath();
-            ctx.arc(this.position.x - camera.x, this.position.y - camera.y, this.knifeRange * 0.8, startAngle, endAngle);
+            ctx.arc(this.position.x, this.position.y, this.knifeRange * 0.8, startAngle, endAngle); // Removed - camera.x/y
             ctx.stroke();
          }
 
           if (this.interactTarget) {
               let interactText = 'Interact';
-              if (this.interactTarget.isDoor) interactText = 'Open/Close Door';
-              else if (this.interactTarget.isGenerator) interactText = 'Siphon Plasma';
-              else if (this.interactTarget.isContainer) interactText = 'Open Container';
-              else if (this.interactTarget.isMedKit) interactText = 'Open MedKit';
-              else if (this.interactTarget.isStairs) interactText = 'Use Stairs';
+              // Removed Tree hint text check
+              if (this.interactTarget?.type === 'StorageDepot') interactText = 'Deposit Resources'; // Add Depot text
+              else if (this.interactTarget?.isDoor) interactText = 'Open/Close Door';
+              else if (this.interactTarget?.isGenerator) interactText = 'Siphon Plasma';
+              else if (this.interactTarget?.isContainer) interactText = 'Open Container';
+              else if (this.interactTarget?.isMedKit) interactText = 'Open MedKit';
+              else if (this.interactTarget?.isStairs) interactText = 'Use Stairs';
 
+              // Draw hints relative to player, scaling font/offset inversely with zoom
+              const fontSize = 16 / camera.zoom;
+              const yOffsetBase = -this.visualSize.y / 2 - (15 / camera.zoom);
               ctx.fillStyle = 'white';
-              ctx.font = '16px Orbitron';
+              ctx.font = `${fontSize}px Orbitron`;
               ctx.textAlign = 'center';
-              ctx.fillText(`[${this.interactKey.toUpperCase()}] ${interactText}`, this.position.x - camera.x, this.position.y - this.visualSize.y / 2 - 15 - camera.y);
-              ctx.textAlign = 'left';
-          }
+              ctx.fillText(`[${this.interactKey.toUpperCase()}] ${interactText}`, this.position.x, this.position.y + yOffsetBase); // Removed - camera.x/y
+              ctx.textAlign = 'left'; // Reset alignment
+        }
 
-          if (this.pickupTarget) {
-              ctx.fillStyle = 'yellow';
-              ctx.font = '16px Orbitron';
-              ctx.textAlign = 'center';
-              const hintYOffset = this.interactTarget ? -this.visualSize.y / 2 - 35 : -this.visualSize.y / 2 - 15;
-              ctx.fillText(`[${this.pickupKey.toUpperCase()}] Pick Up ${this.pickupTarget.itemType}`, this.position.x - camera.x, this.position.y + hintYOffset - camera.y);
-              ctx.textAlign = 'left';
-          }
+        // Determine Y offset for hints to avoid overlap
+        // Adjust hint offsets and font size based on zoom
+        const fontSize = 16 / camera.zoom;
+        const hintSpacing = 20 / camera.zoom;
+        let hintOffsetY = -this.visualSize.y / 2 - (15 / camera.zoom); // Base offset adjusted for zoom
+
+        if (this.interactTarget) {
+            hintOffsetY -= hintSpacing; // Move subsequent hints down if interact hint is shown
+        }
+
+        if (this.pickupTarget) {
+            ctx.fillStyle = 'yellow';
+            ctx.font = `${fontSize}px Orbitron`;
+            ctx.textAlign = 'center';
+            ctx.fillText(`[${this.pickupKey.toUpperCase()}] Pick Up ${this.pickupTarget.itemType}`, this.position.x, this.position.y + hintOffsetY); // Removed - camera.x/y
+            ctx.textAlign = 'left';
+            hintOffsetY -= hintSpacing; // Move subsequent hints down
+        }
+
+        if (this.chopTarget) {
+            ctx.fillStyle = 'orange';
+            ctx.font = `${fontSize}px Orbitron`;
+            ctx.textAlign = 'center';
+            ctx.fillText(`[Hold C] Chop Tree`, this.position.x, this.position.y + hintOffsetY); // Removed - camera.x/y
+            ctx.textAlign = 'left';
+        }
 
 
-          if (this.weapons[this.currentWeaponIndex] === 'Gun' && this.gunFlashTimer > 0) {
-              const flashSize = 15;
-             const direction = this.velocity.magnitude() > 0 ? this.velocity.normalize() : Vector2.fromAngle(-Math.PI / 2);
-             const flashX = this.position.x + direction.x * (this.size.x / 2 + 5) - camera.x;
-             const flashY = this.position.y + direction.y * (this.size.y / 2 + 5) - camera.y;
+        if ((this.weapons[this.currentWeaponIndex] === 'Gun' || this.weapons[this.currentWeaponIndex] === 'Shotgun') && this.gunFlashTimer > 0) {
+             const flashSize = 15 / camera.zoom; // Scale flash size
+             // Use velocity for direction if moving, otherwise default (e.g., facing up)
+             const direction = this.velocity.magnitudeSq() > 1 ? this.velocity.normalize() : Vector2.fromAngle(-Math.PI / 2);
+             const flashX = this.position.x + direction.x * (this.size.x / 2 + (5 / camera.zoom)); // Removed - camera.x, adjust offset
+             const flashY = this.position.y + direction.y * (this.size.y / 2 + (5 / camera.zoom)); // Removed - camera.y, adjust offset
 
              ctx.fillStyle = 'rgba(255, 255, 0, 0.9)';
              ctx.beginPath();
@@ -369,7 +450,8 @@ export class Player extends Entity {
          }
     }
 
-    attack(mousePos, camera, projectiles, settlements) {
+    // attackScreenPos is the mouse position relative to the canvas center, adjusted for zoom in game.js
+    attack(attackScreenPos, camera, projectiles, settlements) {
         if (this.attackCooldown > 0) return;
 
         const weapon = this.weapons[this.currentWeaponIndex];
@@ -391,22 +473,24 @@ export class Player extends Entity {
 
          } else if (weapon === 'Gun') {
              this.attackCooldown = this.gunCooldown;
-            const targetWorldX = mousePos.x + camera.x;
-            const targetWorldY = mousePos.y + camera.y;
-            const direction = new Vector2(targetWorldX - this.position.x, targetWorldY - this.position.y).normalize();
-            const projectileSpawnPos = this.position.add(direction.multiply(this.size.x / 2 + 5));
+             // Calculate world target based on screen position and camera
+             const targetWorldX = attackScreenPos.x / camera.zoom + camera.x;
+             const targetWorldY = attackScreenPos.y / camera.zoom + camera.y;
+             const direction = new Vector2(targetWorldX - this.position.x, targetWorldY - this.position.y).normalize();
+             const projectileSpawnPos = this.position.add(direction.multiply(this.size.x / 2 + 5)); // Spawn relative to player center
 
-            projectiles.push(new Projectile(projectileSpawnPos, direction, this.gunDamage, true));
+             projectiles.push(new Projectile(projectileSpawnPos, direction, this.gunDamage, true));
              this.gunFlashTimer = this.gunFlashDuration;
 
          } else if (weapon === 'Shotgun') {
              this.attackCooldown = this.shotgunCooldown;
-            const targetWorldX = mousePos.x + camera.x;
-            const targetWorldY = mousePos.y + camera.y;
-            const baseDirection = new Vector2(targetWorldX - this.position.x, targetWorldY - this.position.y).normalize();
-            const baseAngle = baseDirection.angle();
+             // Calculate world target based on screen position and camera
+             const targetWorldX = attackScreenPos.x / camera.zoom + camera.x;
+             const targetWorldY = attackScreenPos.y / camera.zoom + camera.y;
+             const baseDirection = new Vector2(targetWorldX - this.position.x, targetWorldY - this.position.y).normalize();
+             const baseAngle = baseDirection.angle();
 
-            for (let i = 0; i < this.shotgunPellets; i++) {
+             for (let i = 0; i < this.shotgunPellets; i++) {
                 const spreadAngle = (Math.random() - 0.5) * this.shotgunSpread;
                 const pelletDirection = Vector2.fromAngle(baseAngle + spreadAngle);
                 const projectileSpawnPos = this.position.add(pelletDirection.multiply(this.size.x / 2 + 5));
@@ -437,40 +521,135 @@ export class Player extends Entity {
         const pos = axis === 'x' ? this.position.x : this.position.y;
 
         obstacles.forEach(obstacle => {
+            // Skip collision check for open doors or stairs (handled elsewhere)
             if ((obstacle.isDoor && obstacle.isOpen) || obstacle.isStairs) {
                 return;
             }
 
-            const obsRect = obstacle.getRectData();
+            // Get collision rectangle data, prioritizing the object's own method if available
+            let obsRect;
+            if (typeof obstacle.getRectData === 'function') { // Check if the method exists
+                 obsRect = obstacle.getRectData(); // Use the method (e.g., for Tree)
+            } else if (obstacle instanceof Entity) { // Fallback for basic entities
+                 obsRect = {
+                     x: obstacle.position.x,
+                     y: obstacle.position.y, // Assumes center anchor for basic entities
+                     width: obstacle.size.x,
+                     height: obstacle.size.y
+                 };
+            } else if (obstacle.getRectData) { // Check if it's a structure with getRectData
+                 obsRect = obstacle.getRectData(); // Use the method if available
+            } else if (obstacle instanceof Entity) { // Fallback for entities without getRectData (shouldn't happen for Tree now)
+                 obsRect = { x: obstacle.position.x, y: obstacle.position.y, width: obstacle.size.x, height: obstacle.size.y };
+            } else {
+                 return; // Skip if it's not a collidable object we know how to handle
+            }
+
             const obsHalfWidth = obsRect.width / 2;
             const obsHalfHeight = obsRect.height / 2;
 
+            // AABB collision check
             if (
                 this.position.x + this.size.x / 2 > obsRect.x - obsHalfWidth &&
                 this.position.x - this.size.x / 2 < obsRect.x + obsHalfWidth &&
                 this.position.y + this.size.y / 2 > obsRect.y - obsHalfHeight &&
                 this.position.y - this.size.y / 2 < obsRect.y + obsHalfHeight
             ) {
+                // Collision detected, resolve it
                 if (axis === 'x') {
-                    const overlap = halfSize + obsHalfWidth - Math.abs(this.position.x - obsRect.x);
+                    const overlap = (this.size.x / 2 + obsHalfWidth) - Math.abs(this.position.x - obsRect.x);
                     if (overlap > 0) {
                         if (this.position.x < obsRect.x) {
-                            this.position.x -= overlap;
+                            this.position.x -= overlap; // Move left
                         } else {
-                            this.position.x += overlap;
+                            this.position.x += overlap; // Move right
                         }
                     }
-                } else {
-                    const overlap = halfSize + obsHalfHeight - Math.abs(this.position.y - obsRect.y);
+                } else { // axis === 'y'
+                    const overlap = (this.size.y / 2 + obsHalfHeight) - Math.abs(this.position.y - obsRect.y);
                      if (overlap > 0) {
                         if (this.position.y < obsRect.y) {
-                            this.position.y -= overlap;
+                            this.position.y -= overlap; // Move up
                         } else {
-                            this.position.y += overlap;
+                            this.position.y += overlap; // Move down
                         }
                     }
                 }
             }
         });
+    }
+
+    // Added helper for dash collision as it needs more complex checks
+    checkMovementCollision(startPos, endPos, obstacles) {
+        let finalPos = endPos.clone();
+        let collisionNormal = null;
+        let minCollisionTime = 1.0;
+
+        const movementVector = endPos.subtract(startPos);
+
+        obstacles.forEach(obstacle => {
+            if ((obstacle.isDoor && obstacle.isOpen) || obstacle.isStairs) {
+                return;
+            }
+
+            let obsRect;
+             if (typeof obstacle.getRectData === 'function') { // Check if the method exists
+                 obsRect = obstacle.getRectData(); // Use the method (e.g., for Tree)
+             } else if (obstacle instanceof Entity) { // Fallback for basic entities
+                 obsRect = { x: obstacle.position.x, y: obstacle.position.y, width: obstacle.size.x, height: obstacle.size.y }; // Assumes center anchor
+             } else {
+                 return; // Skip unknown obstacles
+             }
+
+            // Broad phase check (optional but can optimize)
+            // ...
+
+            // AABB Swept Collision Check (Simplified)
+            const expandedObstacle = {
+                minX: obsRect.x - obsRect.width / 2 - this.size.x / 2,
+                maxX: obsRect.x + obsRect.width / 2 + this.size.x / 2,
+                minY: obsRect.y - obsRect.height / 2 - this.size.y / 2,
+                maxY: obsRect.y + obsRect.height / 2 + this.size.y / 2,
+            };
+
+            let tEnterX = -Infinity, tLeaveX = Infinity;
+            let tEnterY = -Infinity, tLeaveY = Infinity;
+
+            if (movementVector.x === 0) {
+                if (startPos.x <= expandedObstacle.minX || startPos.x >= expandedObstacle.maxX) return; // No X collision possible
+            } else {
+                tEnterX = (expandedObstacle.minX - startPos.x) / movementVector.x;
+                tLeaveX = (expandedObstacle.maxX - startPos.x) / movementVector.x;
+                if (tEnterX > tLeaveX) [tEnterX, tLeaveX] = [tLeaveX, tEnterX]; // Swap if needed
+            }
+
+             if (movementVector.y === 0) {
+                 if (startPos.y <= expandedObstacle.minY || startPos.y >= expandedObstacle.maxY) return; // No Y collision possible
+             } else {
+                 tEnterY = (expandedObstacle.minY - startPos.y) / movementVector.y;
+                 tLeaveY = (expandedObstacle.maxY - startPos.y) / movementVector.y;
+                 if (tEnterY > tLeaveY) [tEnterY, tLeaveY] = [tLeaveY, tEnterY]; // Swap if needed
+             }
+
+            const tEnter = Math.max(tEnterX, tEnterY);
+            const tLeave = Math.min(tLeaveX, tLeaveY);
+
+            if (tEnter < tLeave && tEnter >= 0 && tEnter < 1.0 && tEnter < minCollisionTime) {
+                 minCollisionTime = tEnter;
+                 // Determine collision normal (simplified: assumes axis-aligned collision)
+                 if (tEnterX > tEnterY) {
+                     collisionNormal = new Vector2(movementVector.x > 0 ? -1 : 1, 0);
+                 } else {
+                     collisionNormal = new Vector2(0, movementVector.y > 0 ? -1 : 1);
+                 }
+            }
+        });
+
+        if (collisionNormal) {
+            // Move player just before collision
+            finalPos = startPos.add(movementVector.multiply(minCollisionTime * 0.99)); // Move slightly less than full collision time
+        }
+
+        return { finalPos, collisionNormal };
     }
 }

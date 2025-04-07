@@ -29,29 +29,32 @@ export class Generator extends Entity {
     }
 
     draw(ctx, camera) {
+        // Draw base at world position
         ctx.fillStyle = this.color;
         ctx.fillRect(
-            this.position.x - this.size.x / 2 - camera.x,
-            this.position.y - this.size.y / 2 - camera.y,
+            this.position.x - this.size.x / 2, // Removed - camera.x
+            this.position.y - this.size.y / 2, // Removed - camera.y
             this.size.x,
             this.size.y
         );
+        // Draw border, scaling line width
         ctx.strokeStyle = '#274070';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2 / camera.zoom; // Scale line width
         ctx.strokeRect(
-            this.position.x - this.size.x / 2 - camera.x,
-            this.position.y - this.size.y / 2 - camera.y,
+            this.position.x - this.size.x / 2, // Removed - camera.x
+            this.position.y - this.size.y / 2, // Removed - camera.y
             this.size.x,
             this.size.y
         );
+        // Draw internal lines if not used, scaling line width
         if (!this.used) {
-             ctx.lineWidth = 1;
+             ctx.lineWidth = 1 / camera.zoom; // Scale line width
              const numLines = 3;
              for (let i = 1; i <= numLines; i++) {
-                 const lineX = this.position.x - this.size.x / 2 + (this.size.x * i / (numLines + 1)) - camera.x;
+                 const lineX = this.position.x - this.size.x / 2 + (this.size.x * i / (numLines + 1)); // Removed - camera.x
                  ctx.beginPath();
-                 ctx.moveTo(lineX, this.position.y - this.size.y / 2 - camera.y);
-                 ctx.lineTo(lineX, this.position.y + this.size.y / 2 - camera.y);
+                 ctx.moveTo(lineX, this.position.y - this.size.y / 2); // Removed - camera.y
+                 ctx.lineTo(lineX, this.position.y + this.size.y / 2); // Removed - camera.y
                  ctx.stroke();
              }
         }

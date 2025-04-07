@@ -1,5 +1,8 @@
 import { Vector2 } from '../math/Vector2.js';
 import { Settlement } from '../settlement.js';
+import { Tree } from '../entities/Tree.js';
+import { Plant } from '../entities/Plant.js'; // Import Plant
+import { perlin } from '../math/PerlinNoise.js'; // Import the exported perlin object
 import { Chunk } from './Chunk.js';
 import { CHUNK_SIZE, LOAD_RADIUS } from './constants.js';
 
@@ -9,6 +12,11 @@ export class WorldManager {
         this.activeSettlements = [];
         this.updateScore = updateScoreCallback;
         this.worldSeed = Math.random();
+        // No need to instantiate PerlinNoise, use the imported 'perlin' object directly
+        this.biomeScale = 0.0008; // Lower scale = larger biomes
+        this.forestThreshold = 0.68; // Higher threshold = rarer forests
+        this.settlementExclusionRadiusSq = (CHUNK_SIZE * 1.5) * (CHUNK_SIZE * 1.5); // Prevent forests too close to settlements
+        this.startExclusionRadius = 1; // Exclude starting chunk and immediate neighbors (radius 1)
     }
 
     getChunkCoords(worldX, worldY) {
@@ -66,6 +74,108 @@ export class WorldManager {
             }
         }
 
+        // --- Tree Generation ---
+
+        // Check 1: Don't generate trees in the starting area chunks
+        const distFromStartSq = chunk.chunkX * chunk.chunkX + chunk.chunkY * chunk.chunkY;
+        if (distFromStartSq <= this.startExclusionRadius * this.startExclusionRadius) {
+             chunk.trees = [];
+             chunk.generated = true; // Mark as generated even if no trees/settlement
+             return; // Skip tree generation for start area
+        }
+
+        // Check 2: Don't generate trees if a settlement exists in this chunk
+        if (chunk.settlement) {
+            chunk.trees = [];
+            chunk.generated = true; // Mark as generated
+            return; // Skip tree generation for settlement chunks
+        }
+
+        // Proceed with tree generation only if checks pass
+        const treeDensityInForest = 0.0015; // Higher density inside forests
+        const attemptsPerChunk = Math.floor(CHUNK_SIZE * CHUNK_SIZE * treeDensityInForest * 2); // Try more positions
+        chunk.trees = []; // Initialize trees array for the chunk
+        let treesSpawned = 0;
+
+        for (let i = 0; i < attemptsPerChunk; i++) {
+            const potentialX = chunk.worldX + this.seededRandom(seed + i * 3) * CHUNK_SIZE;
+            const potentialY = chunk.worldY + this.seededRandom(seed + i * 5) * CHUNK_SIZE;
+            const treePos = new Vector2(potentialX, potentialY);
+
+            // Check biome noise using the imported perlin object
+            const noiseValue = (perlin.noise(potentialX * this.biomeScale, potentialY * this.biomeScale, 0) + 1) / 2; // Normalize to 0-1
+
+            if (noiseValue >= this.forestThreshold) {
+                // Check if inside a building
+                let canSpawn = true;
+                if (chunk.settlement) {
+                    for (const building of chunk.settlement.buildings) {
+                        if (building.containsPointFootprint(treePos)) {
+                            canSpawn = false;
+                            break;
+                        }
+                    }
+                }
+
+                // Basic check to avoid trees too close to each other
+                let tooClose = false;
+                const minTreeDistSq = 40 * 40; // Minimum squared distance between trees
+                for(const existingTree of chunk.trees) {
+                    if (treePos.distanceSq(existingTree.position) < minTreeDistSq) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+
+
+                if (canSpawn && !tooClose) {
+                    chunk.trees.push(new Tree(treePos));
+                    treesSpawned++;
+                }
+            }
+        }
+        if (treesSpawned > 0) {
+            console.log(`Generated ${treesSpawned} trees in forest zone of chunk (${chunk.chunkX}, ${chunk.chunkY})`);
+        }
+
+        // --- Generate Decorative Plants (Simplified) ---
+        const PLANT_CHANCE = 1 / 50;
+        const TILE_SIZE = 32; // Assumed tile size for grid iteration
+
+        chunk.decorations = chunk.decorations || []; // Initialize if needed
+        let plantsSpawned = 0; // Keep track for logging
+        const gridCols = Math.floor(CHUNK_SIZE / TILE_SIZE);
+        const gridRows = Math.floor(CHUNK_SIZE / TILE_SIZE);
+
+        // Use a separate seed stream for plant placement consistency
+        let plantSeed = this.simpleHash(chunk.chunkX, chunk.chunkY, this.worldSeed + 1); // Offset seed from tree/settlement gen
+
+        for (let gridY = 0; gridY < gridRows; gridY++) {
+            for (let gridX = 0; gridX < gridCols; gridX++) {
+                // Calculate center of the current tile
+                const potentialX = chunk.worldX + gridX * TILE_SIZE + TILE_SIZE / 2;
+                const potentialY = chunk.worldY + gridY * TILE_SIZE + TILE_SIZE / 2;
+                const plantPos = new Vector2(potentialX, potentialY);
+
+                // Use a unique seed for each tile's random check based on world coords
+                const tileSeed = this.simpleHash(Math.floor(potentialX), Math.floor(potentialY), plantSeed);
+                const randomCheck = this.seededRandom(tileSeed);
+
+                // Simple chance check
+                if (randomCheck < PLANT_CHANCE) {
+                    chunk.decorations.push(new Plant(plantPos));
+                    plantsSpawned++;
+                    // Perturb seed slightly after spawn
+                    plantSeed = this.simpleHash(plantsSpawned, Math.floor(potentialX) * Math.floor(potentialY), plantSeed);
+                }
+            }
+        }
+
+         if (plantsSpawned > 0) {
+             console.log(`Generated ${plantsSpawned} plants in chunk (${chunk.chunkX}, ${chunk.chunkY}) with simple 1/50 chance.`);
+         }
+
+
         chunk.generated = true;
     }
 
@@ -118,7 +228,27 @@ export class WorldManager {
     }
 
     getActiveSettlements() {
-        return this.getActiveChunks().map(chunk => chunk.settlement).filter(settlement => settlement !== null);
+        return this.getActiveChunks().map(chunk => chunk.settlement).filter(settlement => !!settlement);
+    }
+
+    getActiveTrees() {
+        let allTrees = [];
+        this.getActiveChunks().forEach(chunk => {
+            if (chunk.trees) {
+                allTrees = allTrees.concat(chunk.trees);
+            }
+        });
+        return allTrees;
+    }
+
+    getActiveDecorations() {
+        let allDecorations = [];
+        this.getActiveChunks().forEach(chunk => {
+            if (chunk.decorations) {
+                allDecorations = allDecorations.concat(chunk.decorations);
+            }
+        });
+        return allDecorations;
     }
 
     simpleHash(x, y, seed) {

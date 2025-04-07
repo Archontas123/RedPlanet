@@ -8,6 +8,8 @@ export class Chunk {
         this.worldY = chunkY * CHUNK_SIZE;
         this.size = CHUNK_SIZE;
         this.entities = [];
+        this.trees = [];
+        this.decorations = []; // Add decorations array
         this.settlement = null;
         this.generated = false;
         this.lastAccessTime = performance.now();

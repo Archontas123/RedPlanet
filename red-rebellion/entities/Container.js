@@ -29,18 +29,19 @@ export class Container extends Entity {
     }
 
     draw(ctx, camera) {
+        // Draw at world position
         ctx.fillStyle = this.color;
         ctx.fillRect(
-            this.position.x - this.size.x / 2 - camera.x,
-            this.position.y - this.size.y / 2 - camera.y,
+            this.position.x - this.size.x / 2, // Removed - camera.x
+            this.position.y - this.size.y / 2, // Removed - camera.y
             this.size.x,
             this.size.y
         );
         ctx.strokeStyle = '#404a54';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2 / camera.zoom; // Scale line width
         ctx.strokeRect(
-            this.position.x - this.size.x / 2 - camera.x,
-            this.position.y - this.size.y / 2 - camera.y,
+            this.position.x - this.size.x / 2, // Removed - camera.x
+            this.position.y - this.size.y / 2, // Removed - camera.y
             this.size.x,
             this.size.y
         );

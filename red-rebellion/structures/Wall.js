@@ -11,10 +11,11 @@ export class Wall {
 
     draw(ctx, camera) {
         ctx.fillStyle = this.color;
-        const drawBuffer = 1;
+        const drawBuffer = 1 / camera.zoom; // Scale buffer
+        // Draw at world position
         ctx.fillRect(
-            this.position.x - this.size.x / 2 - drawBuffer - camera.x,
-            this.position.y - this.size.y / 2 - drawBuffer - camera.y,
+            this.position.x - this.size.x / 2 - drawBuffer, // Removed - camera.x
+            this.position.y - this.size.y / 2 - drawBuffer, // Removed - camera.y
             this.size.x + drawBuffer * 2,
             this.size.y + drawBuffer * 2
         );

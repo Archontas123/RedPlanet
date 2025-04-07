@@ -44,6 +44,26 @@
                 </div>
                 <button id="close-inventory-button">Close [V]</button>
             </div>
+
+            <!-- Depot GUI Screen -->
+            <div id="depot-gui-screen" class="screen gui-screen"> <!-- Use 'screen' and maybe a new 'gui-screen' class -->
+                <h2>Storage Depot</h2>
+                <div class="depot-container">
+                    <div class="inventory-panel">
+                        <h3>Your Inventory</h3>
+                        <div id="depot-player-inventory-grid" class="inventory-grid">
+                            <!-- Player items will be populated here by JS -->
+                        </div>
+                    </div>
+                    <div class="inventory-panel">
+                        <h3>Depot Storage</h3>
+                        <div id="depot-storage-inventory-grid" class="inventory-grid">
+                            <!-- Depot items will be populated here by JS -->
+                        </div>
+                    </div>
+                </div>
+                <button id="close-depot-gui-button">Close [Esc]</button>
+            </div>
         </div>
 
         <div id="game-over-screen" class="screen">
