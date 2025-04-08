@@ -1,8 +1,9 @@
 import { Vector2 } from '../math/Vector2.js';
 import { Settlement } from '../settlement.js';
 import { Tree } from '../entities/Tree.js';
-import { Plant } from '../entities/Plant.js'; // Import Plant
-import { perlin } from '../math/PerlinNoise.js'; // Import the exported perlin object
+import { Plant } from '../entities/Plant.js';
+import { CaveEntrance } from '../entities/CaveEntrance.js'; // Add this import
+import { perlin } from '../math/PerlinNoise.js';
 import { Chunk } from './Chunk.js';
 import { CHUNK_SIZE, LOAD_RADIUS } from './constants.js';
 
@@ -12,11 +13,11 @@ export class WorldManager {
         this.activeSettlements = [];
         this.updateScore = updateScoreCallback;
         this.worldSeed = Math.random();
-        // No need to instantiate PerlinNoise, use the imported 'perlin' object directly
         this.biomeScale = 0.0008; // Lower scale = larger biomes
         this.forestThreshold = 0.68; // Higher threshold = rarer forests
         this.settlementExclusionRadiusSq = (CHUNK_SIZE * 1.5) * (CHUNK_SIZE * 1.5); // Prevent forests too close to settlements
         this.startExclusionRadius = 1; // Exclude starting chunk and immediate neighbors (radius 1)
+        this.caveEntranceChance = 0.03; // 3% chance per chunk for cave entrance
     }
 
     getChunkCoords(worldX, worldY) {
@@ -75,7 +76,6 @@ export class WorldManager {
         }
 
         // --- Tree Generation ---
-
         // Check 1: Don't generate trees in the starting area chunks
         const distFromStartSq = chunk.chunkX * chunk.chunkX + chunk.chunkY * chunk.chunkY;
         if (distFromStartSq <= this.startExclusionRadius * this.startExclusionRadius) {
@@ -127,7 +127,6 @@ export class WorldManager {
                     }
                 }
 
-
                 if (canSpawn && !tooClose) {
                     chunk.trees.push(new Tree(treePos));
                     treesSpawned++;
@@ -138,7 +137,7 @@ export class WorldManager {
             console.log(`Generated ${treesSpawned} trees in forest zone of chunk (${chunk.chunkX}, ${chunk.chunkY})`);
         }
 
-        // --- Generate Decorative Plants (Simplified) ---
+        // --- Generate Decorative Plants ---
         const PLANT_CHANCE = 1 / 50;
         const TILE_SIZE = 32; // Assumed tile size for grid iteration
 
@@ -171,10 +170,26 @@ export class WorldManager {
             }
         }
 
-         if (plantsSpawned > 0) {
-             console.log(`Generated ${plantsSpawned} plants in chunk (${chunk.chunkX}, ${chunk.chunkY}) with simple 1/50 chance.`);
-         }
-
+        if (plantsSpawned > 0) {
+            console.log(`Generated ${plantsSpawned} plants in chunk (${chunk.chunkX}, ${chunk.chunkY}) with simple 1/50 chance.`);
+        }
+        
+        // --- Cave Entrance Generation ---
+        const caveRoll = this.seededRandom(seed * 31);
+        if (caveRoll < this.caveEntranceChance) {
+            // Don't spawn caves too close to settlements or in starting area
+            if (!chunk.settlement && distFromStartSq > (this.startExclusionRadius * 3) * (this.startExclusionRadius * 3)) {
+                // Find a suitable location for the cave entrance
+                let entranceX = chunk.worldX + 150 + this.seededRandom(seed * 41) * (CHUNK_SIZE - 300);
+                let entranceY = chunk.worldY + 150 + this.seededRandom(seed * 43) * (CHUNK_SIZE - 300);
+                
+                // Create the cave entrance
+                const caveEntrance = new CaveEntrance(new Vector2(entranceX, entranceY));
+                chunk.entities = chunk.entities || [];
+                chunk.entities.push(caveEntrance);
+                console.log(`Generated cave entrance in chunk (${chunk.chunkX}, ${chunk.chunkY}) at ${entranceX.toFixed(0)}, ${entranceY.toFixed(0)}`);
+            }
+        }
 
         chunk.generated = true;
     }
@@ -238,9 +253,9 @@ export class WorldManager {
                 allTrees = allTrees.concat(chunk.trees);
             }
         });
-        return allTrees;
-    }
+        return allTrees
 
+    }
     getActiveDecorations() {
         let allDecorations = [];
         this.getActiveChunks().forEach(chunk => {
@@ -249,6 +264,17 @@ export class WorldManager {
             }
         });
         return allDecorations;
+    }
+    
+    getActiveCaveEntrances() {
+        let allCaveEntrances = [];
+        this.getActiveChunks().forEach(chunk => {
+            if (chunk.entities) {
+                const caveEntrances = chunk.entities.filter(entity => entity.isCaveEntrance);
+                allCaveEntrances = allCaveEntrances.concat(caveEntrances);
+            }
+        });
+        return allCaveEntrances;
     }
 
     simpleHash(x, y, seed) {

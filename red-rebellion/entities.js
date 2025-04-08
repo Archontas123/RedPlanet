@@ -10,3 +10,5 @@ export { MedKit } from './entities/MedKit.js';
 export { Generator } from './entities/Generator.js';
 export { Tree } from './entities/Tree.js'; // Export Tree
 export { Plant } from './entities/Plant.js'; // Export Plant
+export { CaveEntrance } from './entities/CaveEntrance.js'; // Add this line
+export { MineralDeposit } from './entities/MineralDeposit.js'; // Add this line

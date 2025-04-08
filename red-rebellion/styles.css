@@ -389,3 +389,80 @@ button:hover {
     padding: 0.8rem 1.5rem;
     font-size: 1rem;
 }
+
+/* Add these styles to styles.css */
+
+/* Location display styles */
+#location-display {
+    font-size: 1rem;
+    color: #ff7b7b;
+    margin-bottom: 10px;
+    transition: color 0.3s;
+}
+
+#location-display.cave-location {
+    color: #b0b0ff; /* Bluish for cave locations */
+}
+
+/* Tutorial message styles */
+.tutorial-message {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(0, 0, 0, 0.8);
+    color: #ffffff;
+    padding: 20px;
+    border-radius: 10px;
+    font-family: 'Orbitron', sans-serif;
+    max-width: 500px;
+    text-align: center;
+    z-index: 100;
+    border: 2px solid #b0b0ff;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(176, 176, 255, 0.7); }
+    70% { box-shadow: 0 0 0 15px rgba(176, 176, 255, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(176, 176, 255, 0); }
+}
+
+.tutorial-close-button {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: #ff3a3a;
+    color: #0a0a0a;
+    border: none;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    font-size: 12px;
+    font-weight: bold;
+    line-height: 18px; /* Adjust for vertical centering */
+    text-align: center;
+    cursor: pointer;
+    padding: 0;
+    transition: background-color 0.2s;
+}
+
+.tutorial-close-button:hover {
+    background-color: #ff7b7b;
+}
+
+/* Exit prompt styles */
+.exit-prompt {
+    position: absolute;
+    bottom: 50px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: rgba(0, 0, 0, 0.7);
+    color: #ffffff;
+    padding: 10px 20px;
+    border-radius: 5px;
+    font-family: 'Orbitron', sans-serif;
+    z-index: 100;
+    border: 1px solid #4d3319;
+    font-size: 1rem;
+}

@@ -46,7 +46,8 @@ export class Player extends Entity {
         this.pickupKey = 'p';
         this.interactTarget = null;
         this.pickupTarget = null;
-        this.chopTarget = null; // Added for chopping trees
+        this.chopTarget = null; 
+        this.mineTarget = null; // Explicitly add mineTarget for tiles
         this.currentBuilding = null;
         this.inventory = {
             wood: 0,
@@ -225,19 +226,53 @@ export class Player extends Entity {
                               closestInteractable = door;
                           }
                       }
-                  });
-              });
+                 });
+             });
 
-              // Check for nearby interactables when outside (Trees, Depot)
-              const depot = game.playerSettlement?.getStorageDepot(); // Get depot from game's settlement
-              if (depot && depot.isInteractable) {
-                  const distSq = this.position.distanceSq(depot.position);
+             // Check for nearby interactables ONLY when outside (Depot, Cave Entrances)
+             if (!game.inCave) {
+                 const depot = game.playerSettlement?.getStorageDepot(); // Get depot from game's settlement
+                 if (depot && depot.isInteractable) {
+                      const distSq = this.position.distanceSq(depot.position);
+                      if (distSq < minDistanceSq) {
+                          minDistanceSq = distSq;
+                          closestInteractable = depot;
+                     }
+                 }
+
+                 // Check for nearby Cave Entrances
+                 const activeCaveEntrances = worldManager.getActiveCaveEntrances(); // Assuming WorldManager has this
+                 activeCaveEntrances.forEach(entrance => {
+                     if (entrance.isInteractable) {
+                         const distSq = this.position.distanceSq(entrance.position);
+                         if (distSq < minDistanceSq) {
+                             minDistanceSq = distSq;
+                             closestInteractable = entrance;
+                         }
+                     }
+                 });
+             } // End if (!game.inCave) for outside interactables
+
+            // Check for nearby choppable trees when outside
+            this.chopTarget = null;
+            if (!this.currentBuilding) {
                   if (distSq < minDistanceSq) {
                       minDistanceSq = distSq;
                       closestInteractable = depot;
-                  }
-              }
-            // Removed Tree check for 'F' key interaction target
+                 }
+             }
+
+             // Check for nearby Cave Entrances
+             const activeCaveEntrances = worldManager.getActiveCaveEntrances(); // Assuming WorldManager has this
+             activeCaveEntrances.forEach(entrance => {
+                 if (entrance.isInteractable) {
+                     const distSq = this.position.distanceSq(entrance.position);
+                     if (distSq < minDistanceSq) {
+                         minDistanceSq = distSq;
+                         closestInteractable = entrance;
+                     }
+                 }
+             });
 
             // Check for nearby choppable trees when outside
             this.chopTarget = null;
@@ -255,6 +290,46 @@ export class Player extends Entity {
                     }
                 });
                 this.chopTarget = closestTree;
+            }
+            
+            // Check for nearby minable tiles when inside a cave
+            this.mineTarget = null;
+            if (game.inCave && game.currentCave) {
+                const cave = game.currentCave;
+                const reach = 60; // How far the player can mine
+                const targetX = this.position.x + this.velocity.x * 0.1; // Look slightly ahead
+                const targetY = this.position.y + this.velocity.y * 0.1; // Or use mouse direction? For now, just check nearby.
+
+                let closestMinableTile = null;
+                let minMineDistSq = reach * reach;
+
+                // Check a small grid area around the player for minable tiles
+                const checkRadiusTiles = 2; 
+                const playerGridX = Math.floor((this.position.x - cave.position.x) / cave.tileSize);
+                const playerGridY = Math.floor((this.position.y - cave.position.y) / cave.tileSize);
+
+                for (let dy = -checkRadiusTiles; dy <= checkRadiusTiles; dy++) {
+                    for (let dx = -checkRadiusTiles; dx <= checkRadiusTiles; dx++) {
+                        const gridX = playerGridX + dx;
+                        const gridY = playerGridY + dy;
+
+                        if (gridX >= 0 && gridX < cave.gridWidth && gridY >= 0 && gridY < cave.gridHeight) {
+                            const tileType = cave.tiles[gridY][gridX];
+                            // Check if tile is stone or any ore type
+                            if (tileType >= 1 && tileType <= 5) { // TILE_STONE to TILE_PLASMA
+                                const tileWorldX = cave.position.x + gridX * cave.tileSize + cave.tileSize / 2;
+                                const tileWorldY = cave.position.y + gridY * cave.tileSize + cave.tileSize / 2;
+                                const distSq = this.position.distanceSq(new Vector2(tileWorldX, tileWorldY));
+
+                                if (distSq < minMineDistSq) {
+                                    minMineDistSq = distSq;
+                                    closestMinableTile = { gridX, gridY, type: tileType, worldPos: new Vector2(tileWorldX, tileWorldY) };
+                                }
+                            }
+                        }
+                    }
+                }
+                this.mineTarget = closestMinableTile; 
             }
         }
         this.interactTarget = closestInteractable;
@@ -281,14 +356,14 @@ export class Player extends Entity {
 
          if (!this.isDashing) {
              this.position.x += moveX * deltaTime;
-             this.checkAxisCollision('x', currentObstacles);
+             this.checkAxisCollision('x', currentObstacles, game); // Pass game object
 
              this.position.y += moveY * deltaTime;
-             this.checkAxisCollision('y', currentObstacles);
+             this.checkAxisCollision('y', currentObstacles, game); // Pass game object
          } else {
              const currentPosition = this.position.clone();
              const potentialNextPosition = this.position.add(this.velocity.multiply(deltaTime));
-             const collisionResult = this.checkMovementCollision(currentPosition, potentialNextPosition, currentObstacles);
+             const collisionResult = this.checkMovementCollision(currentPosition, potentialNextPosition, currentObstacles, game); // Pass game object
              this.position = collisionResult.finalPos;
              if (collisionResult.collisionNormal) {
                  this.isDashing = false;
@@ -397,6 +472,7 @@ export class Player extends Entity {
               else if (this.interactTarget?.isContainer) interactText = 'Open Container';
               else if (this.interactTarget?.isMedKit) interactText = 'Open MedKit';
               else if (this.interactTarget?.isStairs) interactText = 'Use Stairs';
+              else if (this.interactTarget?.isCaveEntrance) interactText = 'Enter Cave'; // Added Cave Entrance hint
 
               // Draw hints relative to player, scaling font/offset inversely with zoom
               const fontSize = 16 / camera.zoom;
@@ -432,6 +508,18 @@ export class Player extends Entity {
             ctx.font = `${fontSize}px Orbitron`;
             ctx.textAlign = 'center';
             ctx.fillText(`[Hold C] Chop Tree`, this.position.x, this.position.y + hintOffsetY); // Removed - camera.x/y
+            ctx.textAlign = 'left';
+            hintOffsetY -= hintSpacing; // Move subsequent hints down
+        }
+        
+        // Draw mining hint if a tile is targeted
+        if (this.mineTarget) {
+            const tileNames = ['Empty', 'Stone', 'Iron', 'Copper', 'Titanium', 'Plasma'];
+            const tileName = tileNames[this.mineTarget.type] || 'Unknown';
+            ctx.fillStyle = '#b0b0ff'; // Light blue/purple for mining
+            ctx.font = `${fontSize}px Orbitron`;
+            ctx.textAlign = 'center';
+            ctx.fillText(`[Hold M] Mine ${tileName}`, this.position.x, this.position.y + hintOffsetY); // Removed - camera.x/y
             ctx.textAlign = 'left';
         }
 
@@ -513,137 +601,279 @@ export class Player extends Entity {
     takeDamage(amount, gameOverCallback, source = null, killContext = 'other') {
         if (super.takeDamage(amount, source, killContext)) {
             gameOverCallback();
-        }
-    }
+         }
+     }
 
-    checkAxisCollision(axis, obstacles) {
+    checkAxisCollision(axis, obstacles, game) { // Added game parameter
         const halfSize = axis === 'x' ? this.size.x / 2 : this.size.y / 2;
         const pos = axis === 'x' ? this.position.x : this.position.y;
 
-        obstacles.forEach(obstacle => {
-            // Skip collision check for open doors or stairs (handled elsewhere)
-            if ((obstacle.isDoor && obstacle.isOpen) || obstacle.isStairs) {
-                return;
-            }
+        if (game.inCave && game.currentCave) {
+            // --- Cave Tile Collision ---
+            const cave = game.currentCave;
+            const tileSize = cave.tileSize;
+            const playerRect = {
+                minX: this.position.x - this.size.x / 2,
+                maxX: this.position.x + this.size.x / 2,
+                minY: this.position.y - this.size.y / 2,
+                maxY: this.position.y + this.size.y / 2,
+            };
 
-            // Get collision rectangle data, prioritizing the object's own method if available
-            let obsRect;
-            if (typeof obstacle.getRectData === 'function') { // Check if the method exists
-                 obsRect = obstacle.getRectData(); // Use the method (e.g., for Tree)
-            } else if (obstacle instanceof Entity) { // Fallback for basic entities
-                 obsRect = {
-                     x: obstacle.position.x,
-                     y: obstacle.position.y, // Assumes center anchor for basic entities
-                     width: obstacle.size.x,
-                     height: obstacle.size.y
-                 };
-            } else if (obstacle.getRectData) { // Check if it's a structure with getRectData
-                 obsRect = obstacle.getRectData(); // Use the method if available
-            } else if (obstacle instanceof Entity) { // Fallback for entities without getRectData (shouldn't happen for Tree now)
-                 obsRect = { x: obstacle.position.x, y: obstacle.position.y, width: obstacle.size.x, height: obstacle.size.y };
-            } else {
-                 return; // Skip if it's not a collidable object we know how to handle
-            }
+            // Determine grid cells to check around the player
+            const minGridX = Math.max(0, Math.floor((playerRect.minX - cave.position.x) / tileSize));
+            const maxGridX = Math.min(cave.gridWidth - 1, Math.floor((playerRect.maxX - cave.position.x) / tileSize));
+            const minGridY = Math.max(0, Math.floor((playerRect.minY - cave.position.y) / tileSize));
+            const maxGridY = Math.min(cave.gridHeight - 1, Math.floor((playerRect.maxY - cave.position.y) / tileSize));
 
-            const obsHalfWidth = obsRect.width / 2;
-            const obsHalfHeight = obsRect.height / 2;
+            for (let gridY = minGridY; gridY <= maxGridY; gridY++) {
+                for (let gridX = minGridX; gridX <= maxGridX; gridX++) {
+                    const tileType = cave.tiles[gridY][gridX];
+                    if (cave.isSolid(tileType)) {
+                        const tileWorldX = cave.position.x + gridX * tileSize;
+                        const tileWorldY = cave.position.y + gridY * tileSize;
+                        const tileRect = {
+                            minX: tileWorldX,
+                            maxX: tileWorldX + tileSize,
+                            minY: tileWorldY,
+                            maxY: tileWorldY + tileSize,
+                        };
 
-            // AABB collision check
-            if (
-                this.position.x + this.size.x / 2 > obsRect.x - obsHalfWidth &&
-                this.position.x - this.size.x / 2 < obsRect.x + obsHalfWidth &&
-                this.position.y + this.size.y / 2 > obsRect.y - obsHalfHeight &&
-                this.position.y - this.size.y / 2 < obsRect.y + obsHalfHeight
-            ) {
-                // Collision detected, resolve it
-                if (axis === 'x') {
-                    const overlap = (this.size.x / 2 + obsHalfWidth) - Math.abs(this.position.x - obsRect.x);
-                    if (overlap > 0) {
-                        if (this.position.x < obsRect.x) {
-                            this.position.x -= overlap; // Move left
-                        } else {
-                            this.position.x += overlap; // Move right
-                        }
-                    }
-                } else { // axis === 'y'
-                    const overlap = (this.size.y / 2 + obsHalfHeight) - Math.abs(this.position.y - obsRect.y);
-                     if (overlap > 0) {
-                        if (this.position.y < obsRect.y) {
-                            this.position.y -= overlap; // Move up
-                        } else {
-                            this.position.y += overlap; // Move down
+                        // AABB collision check between player and solid tile
+                        if (
+                            playerRect.maxX > tileRect.minX &&
+                            playerRect.minX < tileRect.maxX &&
+                            playerRect.maxY > tileRect.minY &&
+                            playerRect.minY < tileRect.maxY
+                        ) {
+                            // Collision detected, resolve it based on the axis
+                            if (axis === 'x') {
+                                const overlap = (this.size.x / 2 + tileSize / 2) - Math.abs(this.position.x - (tileWorldX + tileSize / 2));
+                                if (overlap > 0) {
+                                    if (this.position.x < tileWorldX + tileSize / 2) {
+                                        this.position.x -= overlap; // Move left
+                                    } else {
+                                        this.position.x += overlap; // Move right
+                                    }
+                                }
+                            } else { // axis === 'y'
+                                const overlap = (this.size.y / 2 + tileSize / 2) - Math.abs(this.position.y - (tileWorldY + tileSize / 2));
+                                if (overlap > 0) {
+                                    if (this.position.y < tileWorldY + tileSize / 2) {
+                                        this.position.y -= overlap; // Move up
+                                    } else {
+                                        this.position.y += overlap; // Move down
+                                    }
+                                }
+                            }
+                            // Re-calculate playerRect after position adjustment for subsequent checks within the loop
+                            playerRect.minX = this.position.x - this.size.x / 2;
+                            playerRect.maxX = this.position.x + this.size.x / 2;
+                            playerRect.minY = this.position.y - this.size.y / 2;
+                            playerRect.maxY = this.position.y + this.size.y / 2;
                         }
                     }
                 }
             }
-        });
+        } else {
+            // --- Original Obstacle Collision (World) ---
+            obstacles.forEach(obstacle => {
+                // Skip collision check for open doors or stairs (handled elsewhere)
+                if ((obstacle.isDoor && obstacle.isOpen) || obstacle.isStairs) {
+                    return;
+                }
+
+                // Get collision rectangle data, prioritizing the object's own method if available
+                let obsRect;
+                if (typeof obstacle.getRectData === 'function') { // Check if the method exists
+                     obsRect = obstacle.getRectData(); // Use the method (e.g., for Tree)
+                } else if (obstacle instanceof Entity) { // Fallback for basic entities
+                     obsRect = {
+                         x: obstacle.position.x,
+                         y: obstacle.position.y, // Assumes center anchor for basic entities
+                         width: obstacle.size.x,
+                         height: obstacle.size.y
+                     };
+                } else if (obstacle.getRectData) { // Check if it's a structure with getRectData
+                     obsRect = obstacle.getRectData(); // Use the method if available
+                } else if (obstacle instanceof Entity) { // Fallback for entities without getRectData (shouldn't happen for Tree now)
+                     obsRect = { x: obstacle.position.x, y: obstacle.position.y, width: obstacle.size.x, height: obstacle.size.y };
+                } else {
+                     return; // Skip if it's not a collidable object we know how to handle
+                }
+
+                const obsHalfWidth = obsRect.width / 2;
+                const obsHalfHeight = obsRect.height / 2;
+
+                // AABB collision check
+                if (
+                    this.position.x + this.size.x / 2 > obsRect.x - obsHalfWidth &&
+                    this.position.x - this.size.x / 2 < obsRect.x + obsHalfWidth &&
+                    this.position.y + this.size.y / 2 > obsRect.y - obsHalfHeight &&
+                    this.position.y - this.size.y / 2 < obsRect.y + obsHalfHeight
+                ) {
+                    // Collision detected, resolve it
+                    if (axis === 'x') {
+                        const overlap = (this.size.x / 2 + obsHalfWidth) - Math.abs(this.position.x - obsRect.x);
+                        if (overlap > 0) {
+                            if (this.position.x < obsRect.x) {
+                                this.position.x -= overlap; // Move left
+                            } else {
+                                this.position.x += overlap; // Move right
+                            }
+                        }
+                    } else { // axis === 'y'
+                        const overlap = (this.size.y / 2 + obsHalfHeight) - Math.abs(this.position.y - obsRect.y);
+                         if (overlap > 0) {
+                            if (this.position.y < obsRect.y) {
+                                this.position.y -= overlap; // Move up
+                            } else {
+                                this.position.y += overlap; // Move down
+                            }
+                        }
+                    }
+                }
+            });
+        }
     }
 
     // Added helper for dash collision as it needs more complex checks
-    checkMovementCollision(startPos, endPos, obstacles) {
+    checkMovementCollision(startPos, endPos, obstacles, game) { // Added game parameter
         let finalPos = endPos.clone();
         let collisionNormal = null;
         let minCollisionTime = 1.0;
 
         const movementVector = endPos.subtract(startPos);
 
-        obstacles.forEach(obstacle => {
-            if ((obstacle.isDoor && obstacle.isOpen) || obstacle.isStairs) {
-                return;
+        if (game.inCave && game.currentCave) {
+            // --- Cave Tile Swept Collision ---
+            const cave = game.currentCave;
+            const tileSize = cave.tileSize;
+            const playerHalfWidth = this.size.x / 2;
+            const playerHalfHeight = this.size.y / 2;
+
+            // Determine grid cells to check based on movement path
+            const startGridX = Math.floor((startPos.x - cave.position.x) / tileSize);
+            const startGridY = Math.floor((startPos.y - cave.position.y) / tileSize);
+            const endGridX = Math.floor((endPos.x - cave.position.x) / tileSize);
+            const endGridY = Math.floor((endPos.y - cave.position.y) / tileSize);
+
+            // Check a bounding box around the movement path
+            const minCheckX = Math.max(0, Math.min(startGridX, endGridX) - 1);
+            const maxCheckX = Math.min(cave.gridWidth - 1, Math.max(startGridX, endGridX) + 1);
+            const minCheckY = Math.max(0, Math.min(startGridY, endGridY) - 1);
+            const maxCheckY = Math.min(cave.gridHeight - 1, Math.max(startGridY, endGridY) + 1);
+
+            for (let gridY = minCheckY; gridY <= maxCheckY; gridY++) {
+                for (let gridX = minCheckX; gridX <= maxCheckX; gridX++) {
+                    const tileType = cave.tiles[gridY][gridX];
+                    if (cave.isSolid(tileType)) {
+                        const tileWorldX = cave.position.x + gridX * tileSize;
+                        const tileWorldY = cave.position.y + gridY * tileSize;
+                        
+                        // Define the tile's AABB expanded by player's half-size
+                        const expandedObstacle = {
+                            minX: tileWorldX - playerHalfWidth,
+                            maxX: tileWorldX + tileSize + playerHalfWidth,
+                            minY: tileWorldY - playerHalfHeight,
+                            maxY: tileWorldY + tileSize + playerHalfHeight,
+                        };
+
+                        // Simplified Swept AABB check (as before, but against tile)
+                        let tEnterX = -Infinity, tLeaveX = Infinity;
+                        let tEnterY = -Infinity, tLeaveY = Infinity;
+
+                        if (movementVector.x === 0) {
+                            if (startPos.x <= expandedObstacle.minX || startPos.x >= expandedObstacle.maxX) continue; 
+                        } else {
+                            tEnterX = (expandedObstacle.minX - startPos.x) / movementVector.x;
+                            tLeaveX = (expandedObstacle.maxX - startPos.x) / movementVector.x;
+                            if (tEnterX > tLeaveX) [tEnterX, tLeaveX] = [tLeaveX, tEnterX];
+                        }
+
+                         if (movementVector.y === 0) {
+                             if (startPos.y <= expandedObstacle.minY || startPos.y >= expandedObstacle.maxY) continue;
+                         } else {
+                             tEnterY = (expandedObstacle.minY - startPos.y) / movementVector.y;
+                             tLeaveY = (expandedObstacle.maxY - startPos.y) / movementVector.y;
+                             if (tEnterY > tLeaveY) [tEnterY, tLeaveY] = [tLeaveY, tEnterY];
+                         }
+
+                        const tEnter = Math.max(tEnterX, tEnterY);
+                        const tLeave = Math.min(tLeaveX, tLeaveY);
+
+                        if (tEnter < tLeave && tEnter >= 0 && tEnter < 1.0 && tEnter < minCollisionTime) {
+                             minCollisionTime = tEnter;
+                             if (tEnterX > tEnterY) {
+                                 collisionNormal = new Vector2(movementVector.x > 0 ? -1 : 1, 0);
+                             } else {
+                                 collisionNormal = new Vector2(0, movementVector.y > 0 ? -1 : 1);
+                             }
+                        }
+                    }
+                }
             }
 
-            let obsRect;
-             if (typeof obstacle.getRectData === 'function') { // Check if the method exists
-                 obsRect = obstacle.getRectData(); // Use the method (e.g., for Tree)
-             } else if (obstacle instanceof Entity) { // Fallback for basic entities
-                 obsRect = { x: obstacle.position.x, y: obstacle.position.y, width: obstacle.size.x, height: obstacle.size.y }; // Assumes center anchor
-             } else {
-                 return; // Skip unknown obstacles
-             }
+        } else {
+            // --- Original Obstacle Swept Collision (World) ---
+            obstacles.forEach(obstacle => {
+                if ((obstacle.isDoor && obstacle.isOpen) || obstacle.isStairs) {
+                    return;
+                }
 
-            // Broad phase check (optional but can optimize)
-            // ...
-
-            // AABB Swept Collision Check (Simplified)
-            const expandedObstacle = {
-                minX: obsRect.x - obsRect.width / 2 - this.size.x / 2,
-                maxX: obsRect.x + obsRect.width / 2 + this.size.x / 2,
-                minY: obsRect.y - obsRect.height / 2 - this.size.y / 2,
-                maxY: obsRect.y + obsRect.height / 2 + this.size.y / 2,
-            };
-
-            let tEnterX = -Infinity, tLeaveX = Infinity;
-            let tEnterY = -Infinity, tLeaveY = Infinity;
-
-            if (movementVector.x === 0) {
-                if (startPos.x <= expandedObstacle.minX || startPos.x >= expandedObstacle.maxX) return; // No X collision possible
-            } else {
-                tEnterX = (expandedObstacle.minX - startPos.x) / movementVector.x;
-                tLeaveX = (expandedObstacle.maxX - startPos.x) / movementVector.x;
-                if (tEnterX > tLeaveX) [tEnterX, tLeaveX] = [tLeaveX, tEnterX]; // Swap if needed
-            }
-
-             if (movementVector.y === 0) {
-                 if (startPos.y <= expandedObstacle.minY || startPos.y >= expandedObstacle.maxY) return; // No Y collision possible
-             } else {
-                 tEnterY = (expandedObstacle.minY - startPos.y) / movementVector.y;
-                 tLeaveY = (expandedObstacle.maxY - startPos.y) / movementVector.y;
-                 if (tEnterY > tLeaveY) [tEnterY, tLeaveY] = [tLeaveY, tEnterY]; // Swap if needed
-             }
-
-            const tEnter = Math.max(tEnterX, tEnterY);
-            const tLeave = Math.min(tLeaveX, tLeaveY);
-
-            if (tEnter < tLeave && tEnter >= 0 && tEnter < 1.0 && tEnter < minCollisionTime) {
-                 minCollisionTime = tEnter;
-                 // Determine collision normal (simplified: assumes axis-aligned collision)
-                 if (tEnterX > tEnterY) {
-                     collisionNormal = new Vector2(movementVector.x > 0 ? -1 : 1, 0);
+                let obsRect;
+                 if (typeof obstacle.getRectData === 'function') { // Check if the method exists
+                     obsRect = obstacle.getRectData(); // Use the method (e.g., for Tree)
+                 } else if (obstacle instanceof Entity) { // Fallback for basic entities
+                     obsRect = { x: obstacle.position.x, y: obstacle.position.y, width: obstacle.size.x, height: obstacle.size.y }; // Assumes center anchor
                  } else {
-                     collisionNormal = new Vector2(0, movementVector.y > 0 ? -1 : 1);
+                     return; // Skip unknown obstacles
                  }
-            }
-        });
+
+
+                // Broad phase check (optional but can optimize)
+                // ...
+
+                // AABB Swept Collision Check (Simplified)
+                const expandedObstacle = {
+                    minX: obsRect.x - obsRect.width / 2 - this.size.x / 2,
+                    maxX: obsRect.x + obsRect.width / 2 + this.size.x / 2,
+                    minY: obsRect.y - obsRect.height / 2 - this.size.y / 2,
+                    maxY: obsRect.y + obsRect.height / 2 + this.size.y / 2,
+                };
+
+                let tEnterX = -Infinity, tLeaveX = Infinity;
+                let tEnterY = -Infinity, tLeaveY = Infinity;
+
+                if (movementVector.x === 0) {
+                    if (startPos.x <= expandedObstacle.minX || startPos.x >= expandedObstacle.maxX) return; // No X collision possible
+                } else {
+                    tEnterX = (expandedObstacle.minX - startPos.x) / movementVector.x;
+                    tLeaveX = (expandedObstacle.maxX - startPos.x) / movementVector.x;
+                    if (tEnterX > tLeaveX) [tEnterX, tLeaveX] = [tLeaveX, tEnterX]; // Swap if needed
+                }
+
+                 if (movementVector.y === 0) {
+                     if (startPos.y <= expandedObstacle.minY || startPos.y >= expandedObstacle.maxY) return; // No Y collision possible
+                 } else {
+                     tEnterY = (expandedObstacle.minY - startPos.y) / movementVector.y;
+                     tLeaveY = (expandedObstacle.maxY - startPos.y) / movementVector.y;
+                     if (tEnterY > tLeaveY) [tEnterY, tLeaveY] = [tLeaveY, tEnterY]; // Swap if needed
+                 }
+
+                const tEnter = Math.max(tEnterX, tEnterY);
+                const tLeave = Math.min(tLeaveX, tLeaveY);
+
+                if (tEnter < tLeave && tEnter >= 0 && tEnter < 1.0 && tEnter < minCollisionTime) {
+                     minCollisionTime = tEnter;
+                     // Determine collision normal (simplified: assumes axis-aligned collision)
+                     if (tEnterX > tEnterY) {
+                         collisionNormal = new Vector2(movementVector.x > 0 ? -1 : 1, 0);
+                     } else {
+                         collisionNormal = new Vector2(0, movementVector.y > 0 ? -1 : 1);
+                     }
+                }
+            });
+        }
 
         if (collisionNormal) {
             // Move player just before collision
