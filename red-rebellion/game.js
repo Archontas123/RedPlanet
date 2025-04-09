@@ -1,11 +1,10 @@
 import { Vector2, lineIntersectsRect, isLineOfSightClear } from './utils.js';
 // Removed duplicate: import { Vector2 } from './math/Vector2.js';
-import { Player, Projectile, Item, ItemDrop, Container, MedKit, Generator, Tree, CaveEntrance, MineralDeposit } from './entities.js';
+import { Player, Projectile, Item, ItemDrop, Container, MedKit, Generator, Tree, MineralDeposit } from './entities.js';
 import { Settlement } from './settlement.js';
 import { PlayerSettlement } from './PlayerSettlement.js';
 import { Door, StorageDepot, Building } from './structures.js'; // Import Building
 import { WorldManager, CHUNK_SIZE, LOAD_RADIUS } from './world.js';
-import { CaveSystem } from './world/CaveSystem.js';
 
 class Game {
     constructor() {
@@ -17,7 +16,7 @@ class Game {
         this.canvas = document.getElementById('game-canvas');
         this.ctx = this.canvas.getContext('2d');
         this.ctx.imageSmoothingEnabled = false;
-        
+
         // Add these lines for off-screen canvas
         this.gameWidth = 1280;  // Fixed game resolution width
         this.gameHeight = 720;  // Fixed game resolution height
@@ -26,7 +25,7 @@ class Game {
         this.offscreenCanvas.height = this.gameHeight;
         this.offscreenCtx = this.offscreenCanvas.getContext('2d');
         this.offscreenCtx.imageSmoothingEnabled = false; // Crucial for pixel art
-        
+
         this.minimapCanvas = document.getElementById('minimap-canvas');
         this.minimapCtx = this.minimapCanvas ? this.minimapCanvas.getContext('2d') : null;
         this.healthFill = document.getElementById('health-fill');
@@ -58,12 +57,7 @@ class Game {
         this.activeDepotGui = null; // Reference to the depot being interacted with
         this.camera = { x: 0, y: 0, zoom: 1.5 }; // Added zoom property
         this.mousePos = { x: 0, y: 0 };
-        
-        // Cave system properties
-        this.inCave = false;
-        this.currentCave = null;
-        this.caves = new Map(); // Store cave systems by ID
-        this.shownCaveTutorial = false;
+
         this.shownTreeTutorial = false; // Added for tree tutorial
         this.shownDepotTutorial = false; // Added for depot tutorial
         this.shownSettlementTutorial = false; // Added for settlement tutorial
@@ -72,11 +66,13 @@ class Game {
         this.mineCooldown = 0;
         this.mineToolMessageTimer = 0;
         this.chopCooldown = 0;
+        // Removed duplicate mineToolMessageTimer
 
-        this.keys = { 
-            w: false, a: false, s: false, d: false, 
-            shift: false, e: false, space: false, 
-            f: false, v: false, p: false, c: false, m: false 
+        this.keys = {
+            w: false, a: false, s: false, d: false,
+            shift: false, e: false, space: false,
+            f: false, v: false, p: false, c: false, m: false,
+            u: false // Added 'u' key for layer switching
         };
 
         this.itemImagePaths = {
@@ -153,14 +149,12 @@ class Game {
                         console.log("Tutorial closed with 'X' key.");
                     }
                     e.preventDefault(); // Prevent other 'x' actions if any
-                }
-            // Removed the misplaced brace from here
             } else if (key === 'v' && !this.depotGuiOpen) { // Prevent opening inventory if depot is open
                 this.toggleInventory();
                 this.keys.v = true;
                 e.preventDefault();
-            } 
-            
+            }
+
             // Always check this condition after handling specific keys like 'x' or 'v'
             if (!this.inventoryOpen && !this.depotGuiOpen) { // Only handle game keys if no GUI is open
                 if (e.key === ' ') {
@@ -175,12 +169,16 @@ class Game {
                     this.keys.c = true;
                 } else if (key === 'm') { // Handle 'm' key down
                     this.keys.m = true;
+                } else if (key === 'u') { // Handle 'u' key down for layer toggle
+                    this.keys.u = true;
+                    this.toggleLayer(); // Call the toggle function
                 } else if (key in this.keys) {
                     this.keys[key] = true;
                 }
-            } 
-        } // Added the brace here to correctly close the 'if (this.gameActive && this.player)' block.
-    
+            }
+        }
+    }
+
 
     // --- Depot GUI Methods ---
 
@@ -338,90 +336,6 @@ class Game {
         }
     }
 
-    // --- End Depot GUI Methods ---
-
-    // --- Cave System Methods ---
-    
-    enterCave(caveId, player) {
-        if (this.inCave) return; // Already in a cave
-        
-        // Find the cave entrance entity
-        const entrances = this.worldManager.getActiveCaveEntrances();
-        const entrance = entrances.find(e => e.caveId === caveId);
-        
-        if (!entrance) {
-            console.error(`Could not find cave entrance with ID ${caveId}`);
-            return;
-        }
-        
-        console.log(`Entering cave ${caveId}`);
-        this.inCave = true;
-        
-        // Either retrieve existing cave or create a new one
-        if (!this.caves.has(caveId)) {
-            const newCave = new CaveSystem(caveId, entrance.position);
-            this.caves.set(caveId, newCave);
-            console.log(`Created new cave system for cave ${caveId}`);
-        }
-        
-        this.currentCave = this.caves.get(caveId);
-
-        // Calculate the grid cell corresponding to the world entrance position
-        const entranceGridX = Math.floor((this.currentCave.entrancePosition.x - this.currentCave.position.x) / this.currentCave.tileSize);
-        const entranceGridY = Math.floor((this.currentCave.entrancePosition.y - this.currentCave.position.y) / this.currentCave.tileSize);
-
-        // Calculate the world coordinates of the center of the entrance grid cell
-        const spawnWorldX = this.currentCave.position.x + entranceGridX * this.currentCave.tileSize + this.currentCave.tileSize / 2;
-        const spawnWorldY = this.currentCave.position.y + entranceGridY * this.currentCave.tileSize + this.currentCave.tileSize / 2;
-
-        // Position player at the center of the cleared entrance tile
-        player.position = new Vector2(spawnWorldX, spawnWorldY);
-
-        // Update camera immediately to center on player in cave
-        this.camera.x = player.position.x - (this.gameWidth / this.camera.zoom / 2);
-        this.camera.y = player.position.y - (this.gameHeight / this.camera.zoom / 2);
-        
-        console.log(`Player positioned at ${player.position.x}, ${player.position.y} in cave`);
-    }
-
-    exitCave(player) {
-        if (!this.inCave || !this.currentCave) return;
-        
-        console.log(`Exiting cave ${this.currentCave.caveId}`);
-        
-        // Find the corresponding entrance in the world
-        const entrances = this.worldManager.getActiveCaveEntrances();
-        const entrance = entrances.find(e => e.caveId === this.currentCave.caveId);
-        
-        if (entrance) {
-            // Position player outside the cave
-            player.position = new Vector2(entrance.position.x, entrance.position.y + 30);
-        } else {
-            console.warn(`Could not find original cave entrance for cave ${this.currentCave.caveId}`);
-            // Fallback - just place player somewhere in the active chunks
-            const chunks = this.worldManager.getActiveChunks();
-            if (chunks.length > 0) {
-                const chunk = chunks[0];
-                player.position = new Vector2(
-                    chunk.worldX + CHUNK_SIZE / 2,
-                    chunk.worldY + CHUNK_SIZE / 2
-                );
-            }
-        }
-        
-        // Reset cave state
-        this.inCave = false;
-        this.currentCave = null;
-        
-        // Update camera immediately
-        this.camera.x = player.position.x - (this.gameWidth / this.camera.zoom / 2);
-        this.camera.y = player.position.y - (this.gameHeight / this.camera.zoom / 2);
-        
-        console.log(`Player positioned back in world at ${player.position.x}, ${player.position.y}`);
-    }
-
-    // --- End Cave System Methods ---
-
     handleKeyUp(e) {
         const key = e.key.toLowerCase();
         if (this.gameActive && this.player) {
@@ -438,6 +352,8 @@ class Game {
                     this.keys.c = false;
                 } else if (key === 'm') { // Handle 'm' key up
                     this.keys.m = false;
+                } else if (key === 'u') { // Handle 'u' key up
+                    this.keys.u = false;
                 } else if (key in this.keys) {
                     this.keys[key] = false;
                 }
@@ -447,19 +363,19 @@ class Game {
 
     handleMouseMove(e) {
         const rect = this.canvas.getBoundingClientRect();
-        
+
         // Convert screen coordinates to game coordinates
         const screenX = e.clientX - rect.left;
         const screenY = e.clientY - rect.top;
-        
+
         // Calculate the scaling ratio between screen and game
         const scaleX = this.canvas.width / this.gameWidth;
         const scaleY = this.canvas.height / this.gameHeight;
-        
+
         // Convert to game coordinates, then apply camera
         const gameX = (screenX / scaleX);
         const gameY = (screenY / scaleY);
-        
+
         // Store the world coordinates
         this.mousePos.x = gameX / this.camera.zoom + this.camera.x;
         this.mousePos.y = gameY / this.camera.zoom + this.camera.y;
@@ -480,44 +396,15 @@ class Game {
                 const interactionRadiusSq = 50 * 50; // How close the click needs to be
 
                 let targetEntity = null;
-                
-                // Check if we're in a cave and trying to mine
-                if (this.inCave && equippedWeapon === 'Pickaxe') {
-                    for (const deposit of this.currentCave.mineralDeposits) {
-                        if (deposit.health > 0 && clickPos.distanceSq(deposit.position) < interactionRadiusSq) {
-                            console.log(`Using Pickaxe on ${deposit.depositType} deposit`);
-                            
-                            // Apply damage to the deposit
-                            if (deposit.takeDamage(1, this.player, 'pickaxe') && deposit.health <= 0) {
-                                // Handle resource drops from the depleted deposit
-                                const drops = deposit.getResourceDrops();
-                                if (drops && drops.length > 0) {
-                                    drops.forEach(drop => {
-                                        const dropPos = deposit.position.add(
-                                            new Vector2(Math.random() * 30 - 15, Math.random() * 30 - 15)
-                                        );
-                                        const newDrop = new ItemDrop(dropPos, drop.type, drop.quantity);
-                                        this.itemDrops.push(newDrop);
-                                    });
-                                }
-                            }
-                            
-                            targetEntity = deposit;
-                            break;
-                        }
-                    }
-                }
 
-                // Check trees if not in cave
-                if (!targetEntity && !this.inCave) {
-                    for (const tree of this.allTrees) {
-                        if (tree.health > 0 && clickPos.distanceSq(tree.position) < interactionRadiusSq + tree.interactionRadius * tree.interactionRadius) {
-                             // Check if the tool matches the requirement
+                // Check trees
+                for (const tree of this.allTrees) {
+                    if (tree.health > 0 && clickPos.distanceSq(tree.position) < interactionRadiusSq + tree.interactionRadius * tree.interactionRadius) {
+                         // Check if the tool matches the requirement
                              if (tree.requiredTool && equippedWeapon.toLowerCase() === tree.requiredTool.toLowerCase()) {
                                 targetEntity = tree;
                                 break;
                              }
-                        }
                     }
                 }
 
@@ -545,19 +432,19 @@ class Game {
                 const rect = this.canvas.getBoundingClientRect();
                 const screenX = e.clientX - rect.left;
                 const screenY = e.clientY - rect.top;
-                
+
                 // Convert to game coordinates
                 const scaleX = this.canvas.width / this.gameWidth;
                 const scaleY = this.canvas.height / this.gameHeight;
                 const gameX = (screenX / scaleX);
                 const gameY = (screenY / scaleY);
-                
+
                 // Calculate direction from player to this point for attack
-                const attackScreenPos = { 
-                    x: (gameX - this.gameWidth/2) * this.camera.zoom, 
-                    y: (gameY - this.gameHeight/2) * this.camera.zoom 
+                const attackScreenPos = {
+                    x: (gameX - this.gameWidth/2) * this.camera.zoom,
+                    y: (gameY - this.gameHeight/2) * this.camera.zoom
                 };
-                
+
                 this.player.attack(attackScreenPos, this.camera, this.projectiles, this.worldManager.getActiveSettlements());
             }
         }
@@ -568,7 +455,7 @@ class Game {
         // Keep the canvas filling the window
         this.canvas.width = window.innerWidth;
         this.canvas.height = window.innerHeight;
-        
+
         // We don't resize the offscreen canvas, it stays at fixed resolution
     }
 
@@ -582,9 +469,6 @@ class Game {
             if (target.type === 'StorageDepot') {
                 // Handle depot interaction by toggling the depot GUI
                 target.interact(this.player, this.playerSettlement, this);
-            } else if (target.type === 'CaveEntrance') {
-                // Handle cave entrance interaction
-                target.interact(this.player, this);
             } else if (target.isDoor) {
                 target.interact();
             } else if (target.isStairs) {
@@ -613,23 +497,13 @@ class Game {
             // as the specific checks above should handle interactables correctly,
             // relying on Player.js to find the correct target.
 
-        } else if (this.inCave && this.currentCave) {
-            // Check if player is near the cave exit
-            if (this.currentCave.isNearExit(this.player.position)) {
-                this.exitCave(this.player);
-                return;
-            }
-            
-            // Interaction with minable tiles is handled by the 'M' key logic now,
-            // so the old check for MineralDeposit entities here is removed.
-            
         }
     }
 
     initGame() {
         this.canvas.width = window.innerWidth;
         this.canvas.height = window.innerHeight;
-        
+
         // Set up offscreen canvas
         this.offscreenCanvas.width = this.gameWidth;
         this.offscreenCanvas.height = this.gameHeight;
@@ -649,7 +523,7 @@ class Game {
             this.playerImgStandard,
             this.playerImgIdle2
         );
-        
+
         // Update the player's inventory to include mining resources
         this.player.inventory = {
             wood: 0,
@@ -659,7 +533,7 @@ class Game {
             heal: 0,
             plasma: 0,
             stone: 0,    // Add new mining resources
-            iron: 0,     
+            iron: 0,
             copper: 0,
             titanium: 0,
             plasma_crystal: 0
@@ -676,12 +550,7 @@ class Game {
         this.allTrees = []; // Reset trees on game init
         this.plasmaScore = 0;
         this.updateScoreDisplay();
-        
-        // Reset cave system state
-        this.inCave = false;
-        this.currentCave = null;
-        this.caves = new Map();
-        this.shownCaveTutorial = false;
+
         this.shownTreeTutorial = false; // Reset tree tutorial flag
         this.shownDepotTutorial = false; // Reset depot tutorial flag
         this.shownSettlementTutorial = false; // Reset settlement tutorial flag
@@ -722,77 +591,12 @@ class Game {
         // --- GAME LOGIC UPDATES ---
         // Only update game state if no GUI is open
         if (!this.inventoryOpen && !this.depotGuiOpen) {
-            // Update world chunks if not in cave
-            if (!this.inCave) {
-                this.worldManager.updateActiveChunks(this.player.position.x, this.player.position.y);
-            }
+            this.worldManager.updateActiveChunks(this.player.position.x, this.player.position.y);
 
             this.player.update(deltaTime, this.keys, this.worldManager, this.healthFill, this.weaponDisplay, this.projectiles, this.itemDrops, this);
 
-            // Check for nearby cave entrances to show tutorial
-            if (!this.shownCaveTutorial && !this.inCave) {
-                const caveEntrances = this.worldManager.getActiveCaveEntrances();
-                for (const entrance of caveEntrances) {
-                    if (this.player.position.distance(entrance.position) < 200) {
-                        // Show tutorial message
-                        console.log("Tutorial: Press F near cave entrances to explore underground areas. Use your Pickaxe to mine resources inside.");
-                        this.shownCaveTutorial = true;
-                        
-                        // Optionally show a more visible UI message
-                        // Ensure only one tutorial message exists
-                        if (this.activeTutorialMessage && this.activeTutorialMessage.parentNode) {
-                            this.activeTutorialMessage.parentNode.removeChild(this.activeTutorialMessage);
-                            clearTimeout(this.activeTutorialTimeoutId);
-                        }
-
-                        this.activeTutorialMessage = document.createElement('div');
-                        this.activeTutorialMessage.className = 'tutorial-message';
-                        
-                        const messageText = document.createElement('span');
-                        messageText.textContent = "Cave Entrance Discovered! Press F near cave entrances to explore underground areas. Use your Pickaxe (or 'X' key) to close this message."; // Updated text
-                        this.activeTutorialMessage.appendChild(messageText);
-
-                        const closeButton = document.createElement('button');
-                        closeButton.className = 'tutorial-close-button';
-                        closeButton.textContent = 'X';
-                        
-                        // Store references for removal logic
-                        const currentTutorialMsg = this.activeTutorialMessage; 
-                        
-                        document.body.appendChild(currentTutorialMsg);
-                        
-                        // Keep the timeout as a fallback
-                        this.activeTutorialTimeoutId = setTimeout(() => {
-                            if (currentTutorialMsg.parentNode) {
-                                currentTutorialMsg.parentNode.removeChild(currentTutorialMsg);
-                                if (this.activeTutorialMessage === currentTutorialMsg) { // Check if it's still the active one
-                                    this.activeTutorialMessage = null;
-                                    this.activeTutorialTimeoutId = null;
-                                }
-                            }
-                        }, 8000);
-                        
-                        // Button click handler
-                        closeButton.onclick = () => {
-                            if (currentTutorialMsg.parentNode) {
-                                currentTutorialMsg.parentNode.removeChild(currentTutorialMsg);
-                                clearTimeout(this.activeTutorialTimeoutId); 
-                                if (this.activeTutorialMessage === currentTutorialMsg) {
-                                    this.activeTutorialMessage = null;
-                                    this.activeTutorialTimeoutId = null;
-                                }
-                            }
-                        };
-                        
-                        currentTutorialMsg.appendChild(closeButton); // Append button after setting up its handler
-
-                        break; // Exit loop once cave tutorial is shown
-                    }
-                }
-            }
-
             // Check for nearby trees to show tutorial
-            if (!this.shownTreeTutorial && !this.inCave) {
+            if (!this.shownTreeTutorial) {
                 for (const tree of this.allTrees) {
                     if (!tree.isFelled && this.player.position.distance(tree.position) < 150) { // Adjust distance as needed
                         this.showTutorialMessage("Tree Discovered! Equip your Axe and hold 'C' near trees to chop them down for wood.", 'tree');
@@ -803,16 +607,16 @@ class Game {
             }
 
             // Check for nearby player depot to show tutorial
-            if (!this.shownDepotTutorial && !this.inCave && this.playerSettlement) {
+            if (!this.shownDepotTutorial && this.playerSettlement) {
                 const depot = this.playerSettlement.structures.find(s => s instanceof StorageDepot);
                 if (depot && this.player.position.distance(depot.position) < 150) { // Adjust distance as needed
                     this.showTutorialMessage("Storage Depot Found! Press 'F' near your depot to open the storage interface and transfer resources.", 'depot');
                     this.shownDepotTutorial = true;
                 }
             }
-            
+
             // Check for nearby enemy settlements to show tutorial (Optional - might be too spammy)
-            // if (!this.shownSettlementTutorial && !this.inCave) {
+            // if (!this.shownSettlementTutorial) {
             //     for (const settlement of activeSettlements) {
             //         // Check distance to settlement center or a key building
             //         if (this.player.position.distance(settlement.position) < 300) { // Adjust distance
@@ -822,22 +626,6 @@ class Game {
             //         }
             //     }
             // }
-            
-            // Handle cave exit prompt
-            if (this.inCave && this.currentCave) {
-                if (this.currentCave.isNearExit(this.player.position)) {
-                    if (this.keys.f) {
-                        this.exitCave(this.player);
-                        this.keys.f = false; // Prevent immediate re-entry
-                    } else if (!this.player.exitPromptShown) {
-                        // Show exit prompt
-                        this.player.exitPromptShown = true;
-                        console.log("Press F to exit the cave");
-                    }
-                } else if (this.player.exitPromptShown) {
-                    this.player.exitPromptShown = false;
-                }
-            }
 
             // Handle chopping action
             if (this.keys.c && this.player.chopTarget) {
@@ -863,59 +651,7 @@ class Game {
                     // Optional: Show a message "Axe required" or similar
                 }
             }
-            
-            // Handle mining tiles with 'm' key
-            if (this.keys.m && this.player.mineTarget && this.inCave && this.currentCave) {
-                const equippedWeapon = this.player.weapons[this.player.currentWeaponIndex];
-                if (equippedWeapon === 'Pickaxe') {
-                    // Apply damage over time while holding 'm'
-                    if (!this.mineCooldown || this.mineCooldown <= 0) {
-                        const targetTile = this.player.mineTarget;
-                        const cave = this.currentCave;
-                        
-                        // For now, destroy tile instantly. Could add health later.
-                        const minedTileType = targetTile.type;
-                        
-                        // Change tile to empty
-                        cave.tiles[targetTile.gridY][targetTile.gridX] = 0; // TILE_EMPTY
-                        
-                        this.mineCooldown = 0.5; // Cooldown in seconds between mining actions
-                        console.log(`Mined tile at [${targetTile.gridX}, ${targetTile.gridY}] type: ${minedTileType}`);
 
-                        // Determine drops based on tile type
-                        let drops = [];
-                        switch (minedTileType) {
-                            case 1: drops.push({ type: 'stone', quantity: 1 }); break; // TILE_STONE
-                            case 2: drops.push({ type: 'iron', quantity: 1 }); break; // TILE_IRON
-                            case 3: drops.push({ type: 'copper', quantity: 1 }); break; // TILE_COPPER
-                            case 4: drops.push({ type: 'titanium', quantity: 1 }); break; // TILE_TITANIUM
-                            case 5: drops.push({ type: 'plasma_crystal', quantity: 1 }); break; // TILE_PLASMA
-                        }
-
-                        // Spawn item drops
-                        if (drops.length > 0) {
-                            drops.forEach(drop => {
-                                const dropPos = targetTile.worldPos.add(
-                                    new Vector2(Math.random() * 20 - 10, Math.random() * 20 - 10) // Smaller spread
-                                );
-                                // Drops in caves don't need a floor index (or assume 0)
-                                const newDrop = new ItemDrop(dropPos, drop.type, drop.quantity); 
-                                this.itemDrops.push(newDrop);
-                            });
-                        }
-                        
-                        // Clear the target after mining
-                        this.player.mineTarget = null; 
-                    }
-                } else {
-                    // Show a message "Pickaxe required" if not equipped
-                    if (!this.mineToolMessageTimer || this.mineToolMessageTimer <= 0) {
-                        console.log("Pickaxe required for mining");
-                        this.mineToolMessageTimer = 2.0; // Only show message every 2 seconds
-                    }
-                }
-            }
-            
             // Update cooldown timers
             if (this.chopCooldown > 0) {
                 this.chopCooldown -= deltaTime;
@@ -926,14 +662,13 @@ class Game {
             if (this.mineToolMessageTimer > 0) {
                 this.mineToolMessageTimer -= deltaTime;
             }
-
-
-            activeSettlements.forEach(settlement => settlement.update(deltaTime, this.player, isLineOfSightClear, this.projectiles, this));
-
-            this.projectiles.forEach(p => p.update(deltaTime, this.worldManager, this.player, () => this.gameOver()));
-            this.projectiles = this.projectiles.filter(p => p.lifeTime > 0);
-
-            this.items.forEach(item => item.update(deltaTime));
+ 
+             activeSettlements.forEach(settlement => settlement.update(deltaTime, this.player, isLineOfSightClear, this.projectiles, this));
+ 
+             this.projectiles.forEach(p => p.update(deltaTime, this.worldManager, this.player, () => this.gameOver(), this)); // Pass 'this' (game instance)
+             this.projectiles = this.projectiles.filter(p => p.lifeTime > 0);
+ 
+             this.items.forEach(item => item.update(deltaTime));
             this.itemDrops.forEach(drop => drop.update(deltaTime));
             this.itemDrops = this.itemDrops.filter(drop => drop.lifeTime > 0);
 
@@ -999,95 +734,88 @@ class Game {
         // --- RENDERING SECTION ---
         // Clear the offscreen canvas
         this.offscreenCtx.clearRect(0, 0, this.gameWidth, this.gameHeight);
-        
-        // Draw background to the offscreen canvas
-        if (this.inCave && this.currentCave) {
-            // Draw cave background
-            this.currentCave.draw(this.offscreenCtx, this.camera);
-        } else {
-            // Draw normal world background
-            this.drawBackground(this.offscreenCtx, this.camera); 
-        }
 
         // --- Apply Camera Transformations to offscreen context ---
         this.offscreenCtx.save();
         this.offscreenCtx.scale(this.camera.zoom, this.camera.zoom);
         this.offscreenCtx.translate(-this.camera.x, -this.camera.y);
 
+        // Draw normal world background (NOW INSIDE TRANSFORM)
+        this.drawBackground(this.offscreenCtx, this.camera);
+
+        // Draw stars (Moved from drawBackground and adjusted)
+        this.drawStars(this.offscreenCtx, this.camera);
+
         const isPlayerInside = !!this.player.currentBuilding;
 
-        // --- Collect and Sort Drawable Entities ---
+        // --- Collect and Sort Drawable Entities based on Player Layer ---
         let drawableEntities = [];
-        let currentObstacles = [];
-        
-        if (this.inCave && this.currentCave) {
-            // In cave - use cave entities and obstacles
-            // drawableEntities = [...this.currentCave.mineralDeposits, ...this.currentCave.otherEntities]; // Removed mineralDeposits
-            drawableEntities = [...this.currentCave.otherEntities]; // Only include other entities for now
-            // currentObstacles = [...this.currentCave.walls]; // Walls are handled by tile collision now
-            currentObstacles = []; // Reset obstacles, collision checks tiles
-            // Add item drops in the cave
-            this.itemDrops.forEach(drop => {
-                drawableEntities.push(drop);
-            });
-        } else {
-            // Normal world - use world entities
-            // Add enemy settlement buildings
+        // let currentObstacles = []; // Obstacles are handled in Player.update
+
+        // Get entities based on the player's current layer
+        if (this.player.currentLayer === 'surface') {
+            // Surface Layer Entities
             activeSettlements.forEach(settlement => {
                 drawableEntities = drawableEntities.concat(settlement.buildings);
-            });
-
-            // Add humans (only if visible on current floor/outside)
-            activeSettlements.forEach(settlement => {
-               settlement.humans.forEach(human => {
-                   const sameFloor = isPlayerInside && human.building === this.player.currentBuilding && human.currentFloor === this.player.currentFloor;
-                   const bothOutside = !isPlayerInside && !human.building;
-                   if (sameFloor || bothOutside) {
-                       drawableEntities.push(human);
-                   }
-               });
-           });
-
-           // Add non-felled trees (only if player is outside)
-           if (!isPlayerInside) {
-                this.allTrees.forEach(tree => {
-                    if (!tree.isFelled) {
-                        drawableEntities.push(tree);
+                // Add humans (only if visible on current floor/outside)
+                settlement.humans.forEach(human => {
+                    const sameFloor = isPlayerInside && human.building === this.player.currentBuilding && human.currentFloor === this.player.currentFloor;
+                    const bothOutside = !isPlayerInside && !human.building;
+                    if (sameFloor || bothOutside) {
+                        drawableEntities.push(human);
                     }
                 });
-           }
+            });
 
-           // Add items (only if player is outside)
-            this.items.forEach(item => {
-                if (!isPlayerInside) {
-                     drawableEntities.push(item);
+            // Add non-felled trees (only if player is outside)
+            if (!isPlayerInside) {
+                 this.allTrees.forEach(tree => { // allTrees currently holds surface trees
+                     if (!tree.isFelled) {
+                         drawableEntities.push(tree);
+                     }
+                 });
+            }
+
+            // Add surface items (only if player is outside)
+             this.items.forEach(item => { // Assuming items are surface only for now
+                 if (!isPlayerInside) {
+                      drawableEntities.push(item);
+                 }
+             });
+
+            // Add surface item drops (only if visible on current floor/outside)
+            this.itemDrops.forEach(drop => { // Assuming drops are surface only for now (needs layer property later)
+                const sameFloor = (!isPlayerInside && drop.floorIndex === 0) ||
+                                  (isPlayerInside && drop.floorIndex === this.player.currentFloor);
+                if (sameFloor) {
+                    drawableEntities.push(drop);
                 }
             });
 
-           // Add item drops (only if visible on current floor/outside)
-           this.itemDrops.forEach(drop => {
-               const sameFloor = (!isPlayerInside && drop.floorIndex === 0) ||
-                                 (isPlayerInside && drop.floorIndex === this.player.currentFloor);
-               if (sameFloor) {
-                   drawableEntities.push(drop);
-               }
-           });
+            // Add player settlement structures (assuming surface only)
+            if (this.playerSettlement) {
+                 drawableEntities = drawableEntities.concat(this.playerSettlement.structures);
+            }
 
-           // Add player settlement structures
-           if (this.playerSettlement) {
-                drawableEntities = drawableEntities.concat(this.playerSettlement.structures);
-           }
+            // Add surface decorations (only if player is outside)
+            if (!isPlayerInside) {
+                drawableEntities = drawableEntities.concat(activeDecorations); // Assumes activeDecorations are surface
+            }
 
-           // Add decorations (only if player is outside)
-           if (!isPlayerInside) {
-               drawableEntities = drawableEntities.concat(activeDecorations);
-           }
-           
-           // Add cave entrances
-           if (!isPlayerInside) {
-               const caveEntrances = this.worldManager.getActiveCaveEntrances();
-               drawableEntities = drawableEntities.concat(caveEntrances);
-           }
+        } else if (this.player.currentLayer === 'underground') {
+            // Underground Layer Entities
+            // TODO: Add logic to get and add underground entities
+            // Example:
+            // const undergroundEntities = this.worldManager.getActiveUndergroundEntities(); // Needs implementation
+            // drawableEntities = drawableEntities.concat(undergroundEntities);
+            // const undergroundDecorations = this.worldManager.getActiveUndergroundDecorations(); // Needs implementation
+            // drawableEntities = drawableEntities.concat(undergroundDecorations);
+            // Add underground item drops if they exist and have a layer property
+            this.itemDrops.forEach(drop => {
+                if (drop.layer === 'underground') { // Needs ItemDrop modification later
+                     drawableEntities.push(drop);
+                }
+            });
         }
 
         // Add projectiles
@@ -1129,8 +857,7 @@ class Game {
         // These are drawn in world coordinates so they should remain with the entities
         if (this.player.interactTarget) {
             let interactText = 'Interact';
-            if (this.player.interactTarget?.type === 'StorageDepot') interactText = 'Deposit Resources'; 
-            else if (this.player.interactTarget?.type === 'CaveEntrance') interactText = 'Enter Cave';
+            if (this.player.interactTarget?.type === 'StorageDepot') interactText = 'Deposit Resources';
             else if (this.player.interactTarget?.isDoor) interactText = 'Open/Close Door';
             else if (this.player.interactTarget?.isGenerator) interactText = 'Siphon Plasma';
             else if (this.player.interactTarget?.isContainer) interactText = 'Open Container';
@@ -1150,7 +877,7 @@ class Game {
         // Draw pickup hints
         const fontSize = 16 / this.camera.zoom;
         const hintSpacing = 25 / this.camera.zoom; // Increased spacing
-        let hintOffsetY = -this.player.visualSize.y / 2 - (15 / this.camera.zoom); 
+        let hintOffsetY = -this.player.visualSize.y / 2 - (15 / this.camera.zoom);
 
         if (this.player.interactTarget) {
             hintOffsetY -= hintSpacing; // Move subsequent hints down if interact hint is shown
@@ -1173,48 +900,28 @@ class Game {
             this.offscreenCtx.textAlign = 'left';
             hintOffsetY -= hintSpacing;
         }
-        
-        if (this.player.mineTarget) {
-            this.offscreenCtx.fillStyle = '#b0b0ff';
-            this.offscreenCtx.font = `${fontSize}px Orbitron`;
-            this.offscreenCtx.textAlign = 'center';
-            this.offscreenCtx.fillText(`[Hold M] Mine ${this.player.mineTarget.depositType}`, this.player.position.x, this.player.position.y + hintOffsetY);
-            this.offscreenCtx.textAlign = 'left';
-        }
-        
-        // Draw cave exit prompt
-        if (this.inCave && this.currentCave && this.player.exitPromptShown) {
-            this.offscreenCtx.fillStyle = '#ffffff';
-            this.offscreenCtx.font = `${fontSize * 1.2}px Orbitron`;
-            this.offscreenCtx.textAlign = 'center';
-            this.offscreenCtx.fillText(`[F] Exit Cave`, this.currentCave.exitPosition.x, this.currentCave.exitPosition.y - 40);
-            this.offscreenCtx.textAlign = 'left';
-        }
 
         // --- Restore offscreen context ---
         this.offscreenCtx.restore();
 
         // --- Draw offscreen canvas to main canvas ---
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        
+
         // Disable smoothing again to ensure crisp pixels
         this.ctx.imageSmoothingEnabled = false;
-        
+
         // Draw the offscreen canvas to the main canvas, scaled to fit
         this.ctx.drawImage(
             this.offscreenCanvas,
             0, 0, this.gameWidth, this.gameHeight,
             0, 0, this.canvas.width, this.canvas.height
         );
-        
+
         // --- Draw HUD directly on the main canvas ---
         // These remain crisp regardless of game scaling
         this.updateHUD();
-        
-        // Draw minimap if not in cave
-        if (!this.inCave) {
-            this.drawMinimap();
-        }
+
+        this.drawMinimap();
 
         requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
     }
@@ -1226,27 +933,27 @@ class Game {
     }
 
     drawBackground(ctx, camera) {
-        // Background should fill the game area regardless of zoom
+        // Background should fill the visible world area
         if (this.groundPattern) {
-            ctx.save();
             ctx.fillStyle = this.groundPattern;
-            // Translate based on camera position but don't scale the pattern itself
-            const tileWidth = this.groundTile.width;
-            const tileHeight = this.groundTile.height;
-            const offsetX = -camera.x % tileWidth;
-            const offsetY = -camera.y % tileHeight;
-            ctx.translate(offsetX, offsetY);
-            // Fill the entire canvas area, extending slightly to cover edges during movement
-            ctx.fillRect(-offsetX - tileWidth, -offsetY - tileHeight, 
-                        this.gameWidth + 2 * tileWidth, 
-                        this.gameHeight + 2 * tileHeight);
-            ctx.restore();
+            // Fill the visible world area. Since we are inside the translated context,
+            // drawing from camera.x, camera.y covers the correct world space.
+            // The pattern origin aligns automatically due to the context translation.
+            const viewWidthWorld = this.gameWidth / camera.zoom;
+            const viewHeightWorld = this.gameHeight / camera.zoom;
+            ctx.fillRect(camera.x, camera.y, viewWidthWorld, viewHeightWorld);
         } else {
-           ctx.fillStyle = '#4d1a00';
-            ctx.fillRect(0, 0, this.gameWidth, this.gameHeight);
+           ctx.fillStyle = '#4d1a00'; // Fallback color
+           const viewWidthWorld = this.gameWidth / camera.zoom;
+           const viewHeightWorld = this.gameHeight / camera.zoom;
+           ctx.fillRect(camera.x, camera.y, viewWidthWorld, viewHeightWorld);
         }
+        // Star drawing logic moved to gameLoop to be within the same transform context
+    }
 
+    drawStars(ctx, camera) {
         // Draw stars - calculate visibility based on game dimensions
+        // This is now called within the transformed context (scaled and translated)
         ctx.fillStyle = 'rgba(255, 255, 200, 0.6)';
         const starsPerChunk = 10;
         // Calculate the visible world area based on camera and zoom
@@ -1276,19 +983,12 @@ class Game {
                     const starWorldX = chunkWorldX + starRelX;
                     const starWorldY = chunkWorldY + starRelY;
 
-                    // Convert world coordinates to game coordinates
-                    const gameX = starWorldX - camera.x;
-                    const gameY = starWorldY - camera.y;
-
-                    // Apply zoom for star positions in the game space
-                    const zoomedGameX = gameX * camera.zoom;
-                    const zoomedGameY = gameY * camera.zoom;
-                    const starSize = 2 * camera.zoom; // Scale star size too
-
-                    // Check if the star is within the game canvas bounds
-                    if (zoomedGameX > -starSize && zoomedGameX < this.gameWidth + starSize && 
-                        zoomedGameY > -starSize && zoomedGameY < this.gameHeight + starSize) {
-                        ctx.fillRect(zoomedGameX / camera.zoom, zoomedGameY / camera.zoom, starSize / camera.zoom, starSize / camera.zoom);
+                    // Check if the star's world position is within the visible area
+                    if (starWorldX >= viewLeftWorld && starWorldX <= viewRightWorld &&
+                        starWorldY >= viewTopWorld && starWorldY <= viewBottomWorld) {
+                        // Draw directly at world coordinates, context handles transform
+                        const starSize = 2 / camera.zoom; // Star size in world units (adjust as needed)
+                        ctx.fillRect(starWorldX - starSize / 2, starWorldY - starSize / 2, starSize, starSize);
                     }
                 }
             }
@@ -1309,10 +1009,11 @@ class Game {
         this.minimapCtx.fillStyle = 'rgba(10, 10, 10, 0.8)';
         this.minimapCtx.fillRect(0, 0, mapWidth, mapHeight);
 
-        const activeSettlements = this.worldManager.getActiveSettlements();
+        // --- Minimap always draws SURFACE data ---
+        const activeSurfaceSettlements = this.worldManager.getActiveSettlements(); // Assumes this gets surface settlements
 
-        this.minimapCtx.fillStyle = '#888888';
-        activeSettlements.forEach(settlement => {
+        this.minimapCtx.fillStyle = '#888888'; // Buildings color
+        activeSurfaceSettlements.forEach(settlement => {
             settlement.buildings.forEach(building => {
                 const relativeX = building.position.x - viewWorldX;
                 const relativeY = building.position.y - viewWorldY;
@@ -1325,22 +1026,6 @@ class Game {
                     this.minimapCtx.fillRect(mapX, mapY, Math.max(1, mapW), Math.max(1, mapH));
                 }
             });
-        });
-        
-        // Draw cave entrances on minimap
-        this.minimapCtx.fillStyle = '#4d3319';
-        const caveEntrances = this.worldManager.getActiveCaveEntrances();
-        caveEntrances.forEach(entrance => {
-            const relativeX = entrance.position.x - viewWorldX;
-            const relativeY = entrance.position.y - viewWorldY;
-            const mapX = relativeX * scale;
-            const mapY = relativeY * scale;
-            
-            if (mapX > 0 && mapX < mapWidth && mapY > 0 && mapY < mapHeight) {
-                this.minimapCtx.beginPath();
-                this.minimapCtx.arc(mapX, mapY, 3, 0, Math.PI * 2);
-                this.minimapCtx.fill();
-            }
         });
 
         this.minimapCtx.fillStyle = '#ff3a3a';
@@ -1411,17 +1096,44 @@ class Game {
                 this.rollIndicator.textContent = `ROLL (${this.player.dashCooldownTimer.toFixed(1)}s)`;
             }
         }
-        
-        // Update location display
+
+        // Update location display based on player's current layer
         if (this.player && this.locationDisplay) {
-            if (this.inCave) {
-                this.locationDisplay.textContent = `Location: Underground Cave`;
-                this.locationDisplay.classList.add('cave-location');
+            const layerName = this.player.currentLayer.charAt(0).toUpperCase() + this.player.currentLayer.slice(1);
+            this.locationDisplay.textContent = `Location: ${layerName}`;
+            // Optional: Add specific class for underground styling if needed
+            if (this.player.currentLayer === 'underground') {
+                 this.locationDisplay.classList.add('cave-location'); // Or a new 'underground-location' class
             } else {
-                this.locationDisplay.textContent = `Location: Surface`;
-                this.locationDisplay.classList.remove('cave-location');
+                 this.locationDisplay.classList.remove('cave-location');
             }
         }
+    }
+
+    // --- Layer Switching ---
+    toggleLayer() {
+        if (!this.player) return;
+
+        if (this.player.currentLayer === 'surface') {
+            this.player.currentLayer = 'underground';
+            console.log("Switched to Underground layer");
+            // TODO: Potentially add visual/audio feedback for layer switch
+            // TODO: Reset interaction targets as they are layer-specific
+            this.player.interactTarget = null;
+            this.player.pickupTarget = null;
+            this.player.chopTarget = null;
+            this.player.mineTarget = null;
+        } else {
+            this.player.currentLayer = 'surface';
+            console.log("Switched to Surface layer");
+            // TODO: Potentially add visual/audio feedback for layer switch
+            // TODO: Reset interaction targets
+            this.player.interactTarget = null;
+            this.player.pickupTarget = null;
+            this.player.chopTarget = null;
+            this.player.mineTarget = null;
+        }
+        this.updateHUD(); // Update HUD immediately after switching
     }
 
     toggleInventory() {
@@ -1479,11 +1191,11 @@ class Game {
         this.finalPlasmaScoreDisplay.textContent = this.plasmaScore;
         this.showScreen(this.gameOverScreen);
     }
-    
+
     // --- Tutorial Message Helper ---
     showTutorialMessage(message, tutorialType) {
         console.log(`Tutorial (${tutorialType}): ${message}`);
-        
+
         // Ensure only one tutorial message exists at a time
         if (this.activeTutorialMessage && this.activeTutorialMessage.parentNode) {
             this.activeTutorialMessage.parentNode.removeChild(this.activeTutorialMessage);
@@ -1492,7 +1204,7 @@ class Game {
 
         this.activeTutorialMessage = document.createElement('div');
         this.activeTutorialMessage.className = 'tutorial-message'; // Use existing class or create new ones
-        
+
         const messageText = document.createElement('span');
         messageText.textContent = `${message} (Press 'X' to close)`;
         this.activeTutorialMessage.appendChild(messageText);
@@ -1500,11 +1212,11 @@ class Game {
         const closeButton = document.createElement('button');
         closeButton.className = 'tutorial-close-button';
         closeButton.textContent = 'X';
-        
-        const currentTutorialMsg = this.activeTutorialMessage; 
-        
+
+        const currentTutorialMsg = this.activeTutorialMessage;
+
         document.body.appendChild(currentTutorialMsg);
-        
+
         // Timeout to auto-remove
         this.activeTutorialTimeoutId = setTimeout(() => {
             if (currentTutorialMsg.parentNode) {
@@ -1515,19 +1227,19 @@ class Game {
                 }
             }
         }, 10000); // Increased duration slightly
-        
+
         // Button click handler
         closeButton.onclick = () => {
             if (currentTutorialMsg.parentNode) {
                 currentTutorialMsg.parentNode.removeChild(currentTutorialMsg);
-                clearTimeout(this.activeTutorialTimeoutId); 
+                clearTimeout(this.activeTutorialTimeoutId);
                 if (this.activeTutorialMessage === currentTutorialMsg) {
                     this.activeTutorialMessage = null;
                     this.activeTutorialTimeoutId = null;
                 }
             }
         };
-        
+
         currentTutorialMsg.appendChild(closeButton);
     }
     // --- End Tutorial Message Helper ---

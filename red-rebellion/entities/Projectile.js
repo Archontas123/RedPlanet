@@ -12,7 +12,8 @@ export class Projectile {
         this.collided = false;
     }
 
-    update(deltaTime, worldManager, player, gameOverCallback) {
+    // Added 'game' parameter
+    update(deltaTime, worldManager, player, gameOverCallback, game = null) {
         if (this.collided) return;
 
         const prevPos = new Vector2(this.position.x, this.position.y);
@@ -69,7 +70,8 @@ export class Projectile {
                 settlement.humans.forEach(human => {
                     const sameFloor = !human.building || human.currentFloor === currentFloorIndex;
                     if (sameFloor && this.lifeTime > 0 && this.position.distance(human.position) < (this.size + human.size.x) / 2) {
-                        human.takeDamage(this.damage, player, 'gun');
+                        // Pass 'game' object to takeDamage
+                        human.takeDamage(this.damage, player, 'gun', game);
                         this.lifeTime = 0;
                         this.collided = true; // Mark as collided after hitting human
                     }

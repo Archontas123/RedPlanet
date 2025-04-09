@@ -2,7 +2,6 @@ import { Vector2 } from '../math/Vector2.js';
 import { Settlement } from '../settlement.js';
 import { Tree } from '../entities/Tree.js';
 import { Plant } from '../entities/Plant.js';
-import { CaveEntrance } from '../entities/CaveEntrance.js'; // Add this import
 import { perlin } from '../math/PerlinNoise.js';
 import { Chunk } from './Chunk.js';
 import { CHUNK_SIZE, LOAD_RADIUS } from './constants.js';
@@ -17,7 +16,6 @@ export class WorldManager {
         this.forestThreshold = 0.68; // Higher threshold = rarer forests
         this.settlementExclusionRadiusSq = (CHUNK_SIZE * 1.5) * (CHUNK_SIZE * 1.5); // Prevent forests too close to settlements
         this.startExclusionRadius = 1; // Exclude starting chunk and immediate neighbors (radius 1)
-        this.caveEntranceChance = 0.03; // 3% chance per chunk for cave entrance
     }
 
     getChunkCoords(worldX, worldY) {
@@ -67,7 +65,7 @@ export class WorldManager {
             );
 
             if (!newSettlement.cleared) {
-                chunk.settlement = newSettlement;
+                chunk.surfaceLayer.settlement = newSettlement; // Modified
                 this.activeSettlements.push(newSettlement);
                 console.log(`Generated settlement in chunk (${chunk.chunkX}, ${chunk.chunkY}) at ${position.x.toFixed(0)}, ${position.y.toFixed(0)}`);
             } else {
@@ -79,14 +77,14 @@ export class WorldManager {
         // Check 1: Don't generate trees in the starting area chunks
         const distFromStartSq = chunk.chunkX * chunk.chunkX + chunk.chunkY * chunk.chunkY;
         if (distFromStartSq <= this.startExclusionRadius * this.startExclusionRadius) {
-             chunk.trees = [];
+             chunk.surfaceLayer.trees = []; // Modified
              chunk.generated = true; // Mark as generated even if no trees/settlement
              return; // Skip tree generation for start area
         }
 
         // Check 2: Don't generate trees if a settlement exists in this chunk
-        if (chunk.settlement) {
-            chunk.trees = [];
+        if (chunk.surfaceLayer.settlement) { // Modified
+            chunk.surfaceLayer.trees = []; // Modified
             chunk.generated = true; // Mark as generated
             return; // Skip tree generation for settlement chunks
         }
@@ -94,7 +92,7 @@ export class WorldManager {
         // Proceed with tree generation only if checks pass
         const treeDensityInForest = 0.0015; // Higher density inside forests
         const attemptsPerChunk = Math.floor(CHUNK_SIZE * CHUNK_SIZE * treeDensityInForest * 2); // Try more positions
-        chunk.trees = []; // Initialize trees array for the chunk
+        chunk.surfaceLayer.trees = []; // Initialize trees array for the chunk - Modified
         let treesSpawned = 0;
 
         for (let i = 0; i < attemptsPerChunk; i++) {
@@ -108,8 +106,8 @@ export class WorldManager {
             if (noiseValue >= this.forestThreshold) {
                 // Check if inside a building
                 let canSpawn = true;
-                if (chunk.settlement) {
-                    for (const building of chunk.settlement.buildings) {
+                if (chunk.surfaceLayer.settlement) { // Modified
+                    for (const building of chunk.surfaceLayer.settlement.buildings) { // Modified
                         if (building.containsPointFootprint(treePos)) {
                             canSpawn = false;
                             break;
@@ -120,7 +118,7 @@ export class WorldManager {
                 // Basic check to avoid trees too close to each other
                 let tooClose = false;
                 const minTreeDistSq = 40 * 40; // Minimum squared distance between trees
-                for(const existingTree of chunk.trees) {
+                for(const existingTree of chunk.surfaceLayer.trees) { // Modified
                     if (treePos.distanceSq(existingTree.position) < minTreeDistSq) {
                         tooClose = true;
                         break;
@@ -128,7 +126,7 @@ export class WorldManager {
                 }
 
                 if (canSpawn && !tooClose) {
-                    chunk.trees.push(new Tree(treePos));
+                    chunk.surfaceLayer.trees.push(new Tree(treePos)); // Modified
                     treesSpawned++;
                 }
             }
@@ -141,7 +139,7 @@ export class WorldManager {
         const PLANT_CHANCE = 1 / 50;
         const TILE_SIZE = 32; // Assumed tile size for grid iteration
 
-        chunk.decorations = chunk.decorations || []; // Initialize if needed
+        chunk.surfaceLayer.decorations = chunk.surfaceLayer.decorations || []; // Initialize if needed - Modified
         let plantsSpawned = 0; // Keep track for logging
         const gridCols = Math.floor(CHUNK_SIZE / TILE_SIZE);
         const gridRows = Math.floor(CHUNK_SIZE / TILE_SIZE);
@@ -162,7 +160,7 @@ export class WorldManager {
 
                 // Simple chance check
                 if (randomCheck < PLANT_CHANCE) {
-                    chunk.decorations.push(new Plant(plantPos));
+                    chunk.surfaceLayer.decorations.push(new Plant(plantPos)); // Modified
                     plantsSpawned++;
                     // Perturb seed slightly after spawn
                     plantSeed = this.simpleHash(plantsSpawned, Math.floor(potentialX) * Math.floor(potentialY), plantSeed);
@@ -172,23 +170,6 @@ export class WorldManager {
 
         if (plantsSpawned > 0) {
             console.log(`Generated ${plantsSpawned} plants in chunk (${chunk.chunkX}, ${chunk.chunkY}) with simple 1/50 chance.`);
-        }
-        
-        // --- Cave Entrance Generation ---
-        const caveRoll = this.seededRandom(seed * 31);
-        if (caveRoll < this.caveEntranceChance) {
-            // Don't spawn caves too close to settlements or in starting area
-            if (!chunk.settlement && distFromStartSq > (this.startExclusionRadius * 3) * (this.startExclusionRadius * 3)) {
-                // Find a suitable location for the cave entrance
-                let entranceX = chunk.worldX + 150 + this.seededRandom(seed * 41) * (CHUNK_SIZE - 300);
-                let entranceY = chunk.worldY + 150 + this.seededRandom(seed * 43) * (CHUNK_SIZE - 300);
-                
-                // Create the cave entrance
-                const caveEntrance = new CaveEntrance(new Vector2(entranceX, entranceY));
-                chunk.entities = chunk.entities || [];
-                chunk.entities.push(caveEntrance);
-                console.log(`Generated cave entrance in chunk (${chunk.chunkX}, ${chunk.chunkY}) at ${entranceX.toFixed(0)}, ${entranceY.toFixed(0)}`);
-            }
         }
 
         chunk.generated = true;
@@ -221,8 +202,8 @@ export class WorldManager {
         for (const [key, chunk] of this.chunks.entries()) {
             if (!currentActiveChunks.has(key) && (now - chunk.lastAccessTime > unloadThreshold)) {
                  chunksToRemove.push(key);
-                 if (chunk.settlement) {
-                     const index = this.activeSettlements.indexOf(chunk.settlement);
+                 if (chunk.surfaceLayer.settlement) { // Modified
+                     const index = this.activeSettlements.indexOf(chunk.surfaceLayer.settlement); // Modified
                      if (index > -1) {
                          this.activeSettlements.splice(index, 1);
                          console.log(`Unloading settlement from chunk (${chunk.chunkX}, ${chunk.chunkY})`);
@@ -242,40 +223,31 @@ export class WorldManager {
         return Array.from(this.chunks.values());
     }
 
+    // --- Getters for Active Entities (Surface Layer Only for now) ---
     getActiveSettlements() {
-        return this.getActiveChunks().map(chunk => chunk.settlement).filter(settlement => !!settlement);
+        return this.getActiveChunks().map(chunk => chunk.surfaceLayer.settlement).filter(settlement => !!settlement); // Modified
     }
 
     getActiveTrees() {
         let allTrees = [];
         this.getActiveChunks().forEach(chunk => {
-            if (chunk.trees) {
-                allTrees = allTrees.concat(chunk.trees);
+            if (chunk.surfaceLayer.trees) { // Modified
+                allTrees = allTrees.concat(chunk.surfaceLayer.trees); // Modified
             }
         });
-        return allTrees
-
+        return allTrees;
     }
+
     getActiveDecorations() {
         let allDecorations = [];
         this.getActiveChunks().forEach(chunk => {
-            if (chunk.decorations) {
-                allDecorations = allDecorations.concat(chunk.decorations);
+            if (chunk.surfaceLayer.decorations) { // Modified
+                allDecorations = allDecorations.concat(chunk.surfaceLayer.decorations); // Modified
             }
         });
         return allDecorations;
     }
-    
-    getActiveCaveEntrances() {
-        let allCaveEntrances = [];
-        this.getActiveChunks().forEach(chunk => {
-            if (chunk.entities) {
-                const caveEntrances = chunk.entities.filter(entity => entity.isCaveEntrance);
-                allCaveEntrances = allCaveEntrances.concat(caveEntrances);
-            }
-        });
-        return allCaveEntrances;
-    }
+    // TODO: Add getters for underground entities when needed
 
     simpleHash(x, y, seed) {
         let h = seed;

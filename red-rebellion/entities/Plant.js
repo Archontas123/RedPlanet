@@ -40,5 +40,10 @@ export class Plant extends Entity {
          return this.position.y - 0.01;
      }
 
-     // Plants don't need update, interact, takeDamage, or getRectData for now
+     // Override the base Entity update method to prevent movement
+     update(deltaTime, currentObstacles) {
+         // Plants are static, do nothing here
+     }
+
+     // Plants don't need interact, takeDamage, or getRectData for now
  }

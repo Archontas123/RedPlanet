@@ -18,6 +18,8 @@ export class Tree extends Entity {
         this.isResourceNode = true;
         this.type = 'Tree';
         this.hitboxOffsetY = 15; // Pixels to shift the hitbox up
+        this.chopProgress = 0; // Tracks progress towards the next 'hit'
+        this.chopTime = 0.5; // Time in seconds per effective 'hit'
 
         // Load the image
         this.image = new Image();
@@ -89,6 +91,21 @@ export class Tree extends Entity {
         return [{ type: this.resourceType, quantity: this.dropAmount }];
     }
 
+    // Method called continuously while player holds chop key near the tree
+    chop(deltaTime, game) {
+        if (this.isFelled || this.health <= 0) return;
+
+        this.chopProgress += deltaTime;
+        if (this.chopProgress >= this.chopTime) {
+            this.chopProgress -= this.chopTime; // Reset progress for next hit
+            const felled = this.takeDamage(1, null, 'axe'); // Apply 1 damage per chop interval
+            if (felled && game && typeof game.handleTreeFelled === 'function') {
+                // Let the game handle spawning drops based on getResourceDrops
+                game.handleTreeFelled(this);
+            }
+        }
+        // Add visual feedback for chopping? (e.g., shaking)
+    }
 
     draw(ctx, camera) {
         if (this.isFelled) return; // Don't draw if felled

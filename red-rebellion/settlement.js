@@ -1,5 +1,6 @@
 import { Vector2 } from './utils.js';
-import { Human, HeavyHuman, Container, MedKit, Generator } from './entities.js';
+// Import Charger along with other entities
+import { Human, HeavyHuman, Charger, Container, MedKit, Generator } from './entities.js';
 import { Building, Wall, Door } from './structures.js';
 
 export class Settlement {
@@ -53,7 +54,17 @@ export class Settlement {
             let newHuman;
 
                 if (patrolPath.length > 0) {
-                    const HumanClass = Math.random() < 0.20 ? HeavyHuman : Human;
+                    // Determine which enemy type to spawn
+                    let HumanClass;
+                    const rand = Math.random();
+                    if (rand < 0.15) { // 15% chance for Charger
+                        HumanClass = Charger;
+                    } else if (rand < 0.35) { // 20% chance for HeavyHuman (0.35 - 0.15 = 0.20)
+                        HumanClass = HeavyHuman;
+                    } else { // Remaining 65% chance for Human
+                        HumanClass = Human;
+                    }
+
                     console.log(`Settlement Constructor: Instantiating ${HumanClass.name} with building:`, building);
                      if (typeof building === 'undefined') {
                           console.error(`!!! Building is undefined right before creating ${HumanClass.name} !!!`);
@@ -64,7 +75,16 @@ export class Settlement {
                     console.warn("Could not generate valid patrol path inside building for human.");
                     const fallbackPoint = building.getRandomPointInside();
                     const fallbackPath = [fallbackPoint];
-                    const HumanClass = Math.random() < 0.20 ? HeavyHuman : Human;
+                    // Use the same logic for fallback spawning
+                    let HumanClass;
+                    const rand = Math.random();
+                     if (rand < 0.15) {
+                         HumanClass = Charger;
+                     } else if (rand < 0.35) {
+                         HumanClass = HeavyHuman;
+                     } else {
+                         HumanClass = Human;
+                     }
                      console.log(`Settlement Constructor: Instantiating FALLBACK ${HumanClass.name} with building:`, building);
                       if (typeof building === 'undefined') {
                            console.error(`!!! Building is undefined right before creating FALLBACK ${HumanClass.name} !!!`);

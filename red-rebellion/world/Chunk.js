@@ -7,10 +7,17 @@ export class Chunk {
         this.worldX = chunkX * CHUNK_SIZE;
         this.worldY = chunkY * CHUNK_SIZE;
         this.size = CHUNK_SIZE;
-        this.entities = [];
-        this.trees = [];
-        this.decorations = []; // Add decorations array
-        this.settlement = null;
+        this.surfaceLayer = {
+            entities: [],
+            trees: [],
+            decorations: [],
+            settlement: null
+        };
+        this.undergroundLayer = {
+            entities: [],
+            mineralDeposits: [], // Placeholder for future mining
+            decorations: []
+        };
         this.generated = false;
         this.lastAccessTime = performance.now();
     }
